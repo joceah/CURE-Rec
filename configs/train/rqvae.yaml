@@ -1,0 +1,17 @@
+# RQ-VAE 训练配置
+epochs: 5000
+batch_size: 2048
+learning_rate: 1e-3
+weight_decay: 0.0
+optimizer: AdamW
+
+# Early stopping（基于碰撞率 eval_step，=50 时每 50 epoch 评估一次）
+early_stopping_patience: 100
+
+# 输出（默认跟随 data.processed_dir）
+output_dir: ${data.processed_dir}
+checkpoint_path: ${train.output_dir}/rqvae_best.pt
+index_output_path: ${train.output_dir}/item.index.json
+
+# 随机种子
+seed: 2024

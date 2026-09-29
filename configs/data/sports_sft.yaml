@@ -1,0 +1,19 @@
+# Stage 3 SFT 数据配置 - Sports
+processed_dir: data/processed/sports_2021_2023
+user_sequences_path: ${data.processed_dir}/user_sequences.json
+train_path: ${data.processed_dir}/train.csv
+valid_path: ${data.processed_dir}/valid.csv
+test_path: ${data.processed_dir}/test.csv
+item_meta_path: ${data.processed_dir}/item_meta.json
+item_index_path: ${data.processed_dir}/item.index.json
+
+# SFT 训练参数
+max_history_len: 20
+num_train_samples: null  # null = 全量训练集
+num_valid_samples: 5000  # 验证集采样数量
+
+# 辅助任务配置
+auxiliary_task:
+  enabled: true
+  task_name: item_reconstruction
+  mix_ratio: 0.3

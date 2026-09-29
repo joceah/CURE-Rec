@@ -1,0 +1,13 @@
+# Stage 2 SID 构建总配置
+# 用法：
+#   python scripts/train/run_text2emb.py
+#   python scripts/train/run_text2emb.py data.text_fields=[title,description]
+#   python scripts/train/run_text2emb.py model/text2emb=custom
+
+defaults:
+  - data: beauty
+  - model/text2emb: default
+  - model/rqvae: default
+  - train: rqvae
+  - override hydra/job_logging: disabled  # 禁用 Hydra 自己的日志文件，只用我们的 logging
+  - _self_

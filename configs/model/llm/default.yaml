@@ -1,0 +1,23 @@
+# LLM 模型配置
+base_model: Qwen/Qwen2.5-1.5B
+sft_model_path: null  # CoT对齐时使用，指向已训练的SFT模型路径
+# tokenizer_path: data/tokenizers/sft_v2_codebook512_clean  # 注释掉，改用动态生成（避免 transformers 库的兼容性问题）
+
+# RQ-VAE 参数（用于构建 SID tokens）
+rqvae:
+  num_layers: 3
+  codebook_size: 512  # 更新为新版 codebook size
+
+# LoRA 配置
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj

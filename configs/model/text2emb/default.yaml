@@ -1,0 +1,10 @@
+# Embedding 模型配置
+model_name: Qwen/Qwen2.5-1.5B
+# 输出向量维度（Qwen2.5-1.5B hidden size）
+embedding_dim: 1536
+# 每批处理的文本数
+batch_size: 64
+# 最大 token 长度
+max_length: 256
+# 输出文件路径（跟随 data.processed_dir）
+output_path: ${data.processed_dir}/item_embeddings.npy

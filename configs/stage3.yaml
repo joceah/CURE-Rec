@@ -1,0 +1,7 @@
+# Stage 3 SFT 总配置
+defaults:
+  - data: beauty_sft
+  - model/llm: default
+  - train: sft
+  - override hydra/job_logging: disabled
+  - _self_

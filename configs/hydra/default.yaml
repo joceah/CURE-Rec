@@ -1,0 +1,7 @@
+# Hydra 运行时配置
+hydra:
+  output_subdir: null  # 禁用 .hydra 子目录
+  run:
+    dir: .  # 不改变工作目录，就在项目根目录运行
+  job:
+    chdir: false  # 不切换目录

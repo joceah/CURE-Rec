@@ -28,14 +28,14 @@ Intentionally excluded:
 - old MIR research notes and markdown plans
 - backups, papers, checkpoints, generated data, and evaluation artifacts
 
-## Known baseline issue to fix first
+## Migration cleanup
 
-The MIR leave-two-out split uses the second-last interaction as validation and the last interaction as test, but the legacy test evaluator constructs test history from the training sequence only. CURE-Rec should evaluate:
+The migrated evaluator removes the legacy CoT/thought-query inference dependency and fixes the leave-two-out evaluation history:
 
 - validation: `history = train`, `target = valid`
 - test: `history = train + valid`, `target = test`
 
-This is a P0 cleanup item before new CURE experiments.
+The data-processing split remains leave-two-out; CURE-Rec should keep this protocol explicit in all experiment reports.
 
 ## Next steps
 

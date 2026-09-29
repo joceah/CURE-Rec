@@ -1,0 +1,20 @@
+# SFT 训练配置
+epochs: 3
+per_device_batch_size: 64
+gradient_accumulation_steps: 4   # 等效 batch_size = 64 * 4 * n_gpu = 512 (2 GPUs)
+learning_rate: 2e-4
+weight_decay: 0.01
+warmup_ratio: 0.03
+max_history_len: 20
+max_seq_len: 512
+aux_ratio: 0.1                    # 辅助任务（item reconstruction）占比
+seed: 42
+
+# wandb
+wandb_project: genrec
+wandb_run_name: sft_v2_codebook512     # v2: 新版 RQ-VAE (codebook=512, 碰撞率 5.17%)
+wandb_log_steps: 10                    # 每 N 个 optimizer step 记录一次 loss
+
+# 输出
+output_dir: data/checkpoints/sft
+tokenizer_save_dir: data/checkpoints/sft/tokenizer

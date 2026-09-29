@@ -1,0 +1,25 @@
+# RQ-VAE 模型配置
+input_dim: 1536       # 与 text2emb.embedding_dim 一致
+encoder_layers:       # 编码器各层隐层大小（解码器自动镜像）
+  - 2048
+  - 1024
+  - 512
+  - 256
+  - 128
+  - 64
+latent_dim: 32        # 量化前的向量维度
+
+# 残差量化参数
+num_layers: 3         # 量化层数（生成 3 层 SID）
+codebook_size: 512    # 每层码本大小
+
+# 损失权重
+commitment_loss_weight: 0.25
+quant_loss_weight: 1.0
+
+# Sinkhorn-Knopp（仅在生成 index 时使用，训练时关闭）
+use_sinkhorn: false
+sk_epsilon: 0.05
+sk_iters: 3
+norm_type: layer
+loss_type: mse

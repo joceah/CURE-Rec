@@ -1,0 +1,13 @@
+# Stage 2 数据配置
+processed_dir: data/processed/beauty_2021_2023
+item_meta_path: ${data.processed_dir}/item_meta.json
+
+# 用于 embedding 编码的字段，按顺序拼接成文本
+# 可选字段：title, description, features, categories, store, details
+text_fields:
+  - title
+  - features
+  - categories
+
+# 字段间分隔符
+field_separator: " "

@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# 数据和模型（不提交大文件）
+data/raw/
+data/processed/
+*.jsonl
+*.json.gz
+*.parquet
+*.arrow
+*.bin
+*.pt
+*.safetensors
+*.ckpt
+
+# 实验输出
+outputs/
+checkpoints/
+wandb/
+runs/
+logs/
+*.log
+
+# 环境
+.env
+.venv/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Jupyter
+.ipynb_checkpoints/
+notebooks/*.ipynb
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# .claude
+.claude/

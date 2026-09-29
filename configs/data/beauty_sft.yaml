@@ -1,0 +1,7 @@
+# Stage 3 数据配置
+processed_dir: data/processed/beauty_2021_2023
+user_sequences_path: ${data.processed_dir}/user_sequences.json
+train_path: ${data.processed_dir}/train.csv
+valid_path: ${data.processed_dir}/valid.csv
+test_path: ${data.processed_dir}/test.csv
+item_index_path: ${data.processed_dir}/item.index.json

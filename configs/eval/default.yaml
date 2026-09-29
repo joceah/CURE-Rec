@@ -1,0 +1,19 @@
+model_path: data/checkpoints/sft/merged
+tokenizer_path: data/checkpoints/sft/tokenizer
+item_index_path: data/processed/beauty_2021_2023/item.index.json
+user_sequences_path: data/processed/beauty_2021_2023/user_sequences.json
+test_csv_path: data/processed/beauty_2021_2023/test.csv
+valid_csv_path: data/processed/beauty_2021_2023/valid.csv  # test history = train + valid
+
+max_history_len: 20
+num_beams: 50
+batch_size: 8
+num_sid_layers: 3
+
+sample_size: 5000        # null = 全量
+random_seed: 42
+
+k_values: [1, 3, 5, 10, 20, 50]
+
+output_dir: data/eval_results
+output_name: sft_5k
