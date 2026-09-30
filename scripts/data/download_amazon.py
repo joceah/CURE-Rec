@@ -7,8 +7,8 @@
 
 用法：
   conda activate MiniOneRec
-  python scripts/data/download_amazon_wget.py
-  python scripts/data/download_amazon_wget.py --output_dir /path/to/custom/dir
+  python scripts/data/download_amazon.py
+  python scripts/data/download_amazon.py --output_dir /path/to/custom/dir
 
 优势：
   - 支持断点续传（中断后重新运行会继续下载）
@@ -31,13 +31,13 @@ logger = logging.getLogger(__name__)
 # Amazon Reviews 2023 官方下载地址
 FILES = [
     {
-        "name": "Sports.jsonl",
-        "url": "https://mcauleylab.ucsd.edu/public_datasets/data/amazon_2023/raw/review_categories/Sports_and_Outdoors.jsonl.gz",
+        "name": "Beauty.jsonl",
+        "url": "https://mcauleylab.ucsd.edu/public_datasets/data/amazon_2023/raw/review_categories/Beauty_and_Personal_Care.jsonl.gz",
         "desc": "用户评论数据",
     },
     {
-        "name": "meta_Sports.jsonl",
-        "url": "https://mcauleylab.ucsd.edu/public_datasets/data/amazon_2023/raw/meta_categories/meta_Sports_and_Outdoors.jsonl.gz",
+        "name": "meta_Beauty.jsonl",
+        "url": "https://mcauleylab.ucsd.edu/public_datasets/data/amazon_2023/raw/meta_categories/meta_Beauty_and_Personal_Care.jsonl.gz",
         "desc": "商品元数据",
     },
 ]
