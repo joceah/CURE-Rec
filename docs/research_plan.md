@@ -1,1347 +1,1146 @@
-# 生成式推荐中的 Causally Faithful Latent Reasoning：研究空位与论文方案
+# CURE-Rec Research Plan
 
-> 更新时间：2026-09-28  
-> 项目背景：MIR / Generative Recommendation / Semantic ID / Latent Reasoning  
-> 目标：从现有 MIR 与早期 implicit-CoT 探索中提炼出一个更干净、可验证、可投稿的研究问题。
+> 更新时间：2026-09-30  
+> Working title: **CURE-Rec: Causal Utilization-Regularized rEasoning for Generative Recommendation**  
+> 核心问题：生成式推荐模型能否学习不仅“与目标相关”，而且真正被最终推荐决策所利用的 latent reasoning？
 
 ---
 
-## 1. 从原始动机重新定义问题
+## 0. 文档定位
 
-最初的研究动机其实一直很清楚：
+这份文档不再只是 research idea 汇总，而是 CURE-Rec 的执行路线图。
 
-> **显式自然语言 Chain-of-Thought（CoT）虽然可能提升推荐模型的推理能力与可解释性，但会引入额外的 token、存储、延迟与在线推理成本。能否把昂贵的显式推理压缩成一种低成本、内部完成的 latent reasoning？**
+项目分成两条互相支撑但工作量不同的主线：
 
-最早的尝试是：
+1. **Method track**：提出一个新的 CURE framework，让 latent reasoning 不仅存在，而且被 generator 真正读取和利用。
+2. **Research / evaluation track**：用 intervention-based protocol 判断 latent reasoning 是否必要、是否个性化、是否只是冗余表示。
 
-```text
+原则上，论文不能只剩下“我们发明了几个新指标”，也不能只剩下“我们又加了一个 latent module”。更完整的故事应该是：
+
+> 先发现 latent reasoning 可能存在 utilization gap，再提出 CURE framework 主动缩小这个 gap，并用 intervention protocol 验证模型确实发生了机制变化。
+
+为了控制工作量，项目采用 **progressive validation**：
+
+- 前期只在自己的 TIGER/Qwen backbone 上验证现象；
+- 只有当现象和方法都成立后，再扩展外部 latent-reasoning baselines；
+- 不在 Phase 0–2 就大规模复现所有近期论文。
+
+---
+
+# 1. 从 MIR 到 CURE-Rec：真正保留什么
+
+最初的目标不是 multi-intent 本身，而是：
+
+> **显式自然语言 CoT 太昂贵，能否把额外推理压缩成低成本的内部 latent computation？**
+
+早期路线大致是：
+
+~~~text
 Large Recommendation LLM
         ↓
 Structured CoT
-(User Profile / Product Features / Matching / ...)
         ↓
 Small Transformer
         ↓
 Thought Tokens
         ↓
 Generative Recommender
-```
+~~~
 
-并通过 MSE 等方式，让小模型产生的 thought tokens 对齐 teacher LLM 的结构化 CoT 表示。
+后来出现的问题包括：
 
-这个思路后来暴露出几个根本问题：
+- teacher CoT 更像 post-hoc explanation，而不是 predictive reasoning；
+- MSE / cosine 对齐只保证表示相似，不保证对推荐有用；
+- 人工定义的 “用户画像 / 商品特点 / matching” 并不一定形成真正的 reasoning chain；
+- thought token 可以被训练出来，但 generator 未必真的读取它；
+- MIR 的多个 latent intent 可能只是“多个不同向量”，不一定是多个功能不同的 intent；
+- 旧 MIR 实验还暴露了 train / inference 路径不一致的问题。
 
-1. **MSE 对齐太粗糙**：一个 latent token 与 teacher embedding 接近，并不意味着它真的包含对推荐有用的信息。
-2. **规范化 CoT 本身未必是真正的“链式推理”**：例如“用户画像”和“商品特征”往往是并列因素，而不是严格的 step-by-step reasoning。
-3. **解释任务和预测任务不一致**：teacher 往往看到 `history + target` 后解释“为什么用户会购买该商品”，这更接近 post-hoc explanation，而真实推荐任务是：
+因此 CURE-Rec 不再把 “K 个 latent intent” 作为起点，而把问题退回到最基本的一层：
 
-```text
-history
-   ↓
-uncertain future preference
-   ↓
-target
-```
-
-4. **有 latent representation 不等于模型真的使用了 latent representation**：模型可能一边把 latent 学得很好，一边仍然主要依赖直接的 `history → target` 路径。
-
-后续 MIR 的多意图设计，本质上仍然围绕同一个问题：
-
-```text
-History
-  ↓
-K Latent Intents
-  ↓
-Dynamic Routing
-  ↓
-SID Generation
-```
-
-但 MIR 又引入了新的困难：
-
-- 一个 next-item target 很难监督 K 个真实不同的 intent；
-- `diversity loss` 只能保证向量不同，不能保证功能不同；
-- SID 的不同 residual quantization 层未必对应不同用户意图；
-- latent module 可能训练存在，但推理阶段拔掉后 backbone 仍然能工作；
-- 如果 zero/shuffle latent 不影响结果，就不能证明模型真的依赖 latent。
-
-因此，现在真正值得保留的，不是 MIR 当前的具体结构，而是最初的问题意识：
-
-> **如何让生成式推荐获得额外的内部推理能力，同时避免显式 CoT 的高成本，并且能够证明这些 latent reasoning state 真正参与了最终决策？**
+> **一个 latent reasoning state，能否成为最终推荐决策真正使用的信息通路？**
 
 ---
 
-# 2. 2025–2026 生成式推荐研究热点
+# 2. 研究假设
 
-近期研究已经明显从“是否需要 latent reasoning”进入到更细粒度的问题：
+CURE-Rec 主要验证三个假设。
 
-```text
-2024:
-加入 reasoning 是否有帮助？
+### H1 — Latent Utilization Gap
 
-2025:
-latent reasoning 能否替代 explicit CoT？
+一个模型可以学到可预测、可解释甚至与 teacher 对齐的 latent state，但最终 generator 仍然主要依赖直接的 history-to-item 路径。
 
-2026:
-reasoning state 应该是什么？
-应该监督什么？
-应该 reasoning 几步？
-哪些 token / 哪些样本值得多想？
-这些 latent state 到底有没有被真正使用？
-```
+也就是说：
 
-当前主要研究方向包括：
+$$
+\text{good latent representation}
+\not\Rightarrow
+\text{latent is used by prediction}
+$$
 
-| 方向 | 主要问题 | 代表性趋势 |
-|---|---|---|
-| Latent Reasoning / Inference-time Compute | 不输出自然语言，直接在 latent space 中增加计算 | ReaRec、LARES、LatentR³、LaRec、RecRec |
-| Adaptive Reasoning Depth | 不同样本动态决定 reasoning 深度 | LASAR、ManCAR |
-| Position-wise Reasoning Budget | 不同 SID 位置使用不同计算预算 | IBA / Where Reasoning Matters |
-| Multi-path / Multi-interest Reasoning | 一个用户对应多个 latent path / interests | LaRec、RecRec、PLR |
-| Latent Semantic Supervision | 给中间 reasoning state 添加语义或过程监督 | S²GR、LaRec、IntuRec |
-| Credit Assignment | 判断哪一步 reasoning 真正提高 target likelihood | HiLaR、SAPO、Retrieval-Grounded Credit Assignment |
-| Semantic ID Tokenizer | 重新设计推荐专用 SID / tokenizer | ReSID、UniGRec、PIT、AsymRec |
-| Efficient Generative Serving | 降低 SID 解码和 Transformer 推理成本 | RPG、SID-MLP、GenRec |
-| Training/Evaluation Protocol | 样本构造、SID collision、历史窗口等对结果影响巨大 | GenPAS、collision-aware evaluation |
+### H2 — Personalized Utilization
 
----
+真正有用的 latent reasoning 不应该只提供一个通用 bias。
 
-# 3. 哪些方向现在已经不适合作为核心创新
+对用户 $i$，正确 latent $Z_i$ 应比来自另一个相似用户的 counterfactual latent $\tilde Z_i$ 更有助于预测当前目标：
 
-## 3.1 固定 K 个 latent intent + diversity loss
-
-形式：
-
-```text
-History
-  ↓
-K Latent Intents
-  ↓
-Routing
-  ↓
-Recommendation
-```
-
-问题：
-
-- Multi-interest / multi-path latent reasoning 已经成为明确方向；
-- K 个不同向量并不等于 K 个不同 intent；
-- pairwise cosine diversity 只保证 representation 不同，不保证 function 不同；
-- 一个 next-item target 对多个 intent 的 identifiability 很弱。
-
-因此 MIR 原版不适合作为论文核心。
-
-## 3.2 显式 CoT → latent token 蒸馏
-
-如果只是 MSE / cosine / InfoNCE 对齐，目前已经不够新。近期工作已经推进到 step-level alignment、trajectory alignment、process supervision、contrastive alignment、latent RL 和 multi-path latent reasoning。
-
-因此，“换一个 loss 蒸馏 CoT”已经很难形成有力 contribution。
-
-## 3.3 动态决定 reasoning depth
-
-这一方向已经出现 per-sample adaptive stopping、policy head 控制 reasoning depth、adjustable inference-time reasoning depth。因此单纯讲“简单用户少想，困难用户多想”已经不够。
-
-## 3.4 按 SID token 分配 reasoning compute
-
-已有工作直接研究不同 SID position 的 information gain，并把更多 compute 分给高信息量位置。
-
-## 3.5 每一步 reasoning 带来多少 target likelihood gain
-
-近期工作已经开始做 reasoning-step credit assignment：
-
-\[
-\Delta_k =
-\log P(y|H,z_{1:k})
--
-\log P(y|H,z_{1:k-1})
-\]
-
-因此，只报告某一步 latent 是否提高 target probability，也不再足够新。
-
----
-
-# 4. 当前真正值得做的研究空位
-
-## Causally Faithful Latent Reasoning for Generative Recommendation
-
-核心问题：
-
-> **Latent reasoning state 是否真正因果地参与了推荐决策？**
-
-进一步：
-
-> **能否训练出“被模型真正利用”的 latent reasoning，而不仅仅是语义上对齐、表征上漂亮、或与 target 相关？**
-
-最核心的 research question：
-
-> **Does the recommender actually use what it reasons?**
-
----
-
-# 5. 为什么这是一个独立于现有工作的研究问题
-
-考虑：
-
-```text
-History H
-   ↓
-Reasoner
-   ↓
-Latent Z
-   ↓
-Generator
-   ↓
-Target y
-```
-
-即使实验观察到：
-
-```text
-with latent: HR@10 = 4.2
-baseline:    HR@10 = 3.8
-```
-
-也不能证明 `Z → prediction`。
-
-真实训练后的模型完全可能是：
-
-```text
-          ┌────────────────┐
-H ───────→│    Backbone     │────→ y
-│         └────────────────┘
-│
-└→ Reasoner → Z ── weak / unused
-```
-
-同时满足：
-
-- Z 与 teacher CoT 很相似；
-- Z 能预测 target；
-- Z 的 auxiliary loss 很低；
-- 整体模型比 baseline 强；
-- 但 decoder 并没有真正依赖 Z。
-
-这就是：
-
-> **representation learning ≠ causal utilization**
-
----
-
-# 6. 与现有 credit assignment 工作的区别
-
-现有工作通常研究：
-
-```text
-加入 z_k 后
-target probability 是否提高？
-```
-
-例如：
-
-\[
-\Delta_k =
-\log P(y|H,z_{1:k})
--
-\log P(y|H,z_{1:k-1})
-\]
-
-这是 incremental predictive gain。
-
-但这里提出的问题是 intervention：
-
-\[
-P(y|H,Z)
-\]
-
-与：
-
-\[
-P(y|H,\operatorname{do}(Z=\tilde Z))
-\]
-
-之间是否产生稳定、符合个性化逻辑的变化。
-
-换句话说：
-
-> 保持用户历史 H 不变，只替换 latent reasoning state Z，推荐结果是否系统性改变？
-
-这是 **causal utilization / interventional faithfulness**，不是普通 likelihood contribution。
-
----
-
-# 7. 核心实验：Latent Intervention Battery
-
-对于每个样本 \(i\)，正常状态：
-
-\[
-P(y_i|H_i,Z_i)
-\]
-
-然后做一系列 intervention。
-
-## 7.1 Zero Latent
-
-```text
-Z_i → 0
-```
-
-测试 latent 被完全移除后，性能是否下降。
-
-如果：
-
-```text
-normal ≈ zero
-```
-
-说明模型很可能绕过了 latent pathway。
-
-## 7.2 Random Latent
-
-```text
-Z_i → ε
-```
-
-测试模型是否对 latent input 敏感。
-
-## 7.3 Global Shuffle
-
-```text
-Z_i → Z_j
-```
-
-其中 \(j \neq i\)。
-
-如果性能几乎不变，latent 可能只是一个通用 bias，而不是个性化 reasoning。
-
-## 7.4 Matched Counterfactual Shuffle
-
-普通 shuffle 容易被质疑为 OOD noise，因此选择另一个满足相似条件的用户：
-
-```text
-same target category
-similar item popularity
-similar history length
-similar baseline difficulty
-different user / different history
-```
-
-构造：
-
-```text
-H_i + Z_j
-```
-
-其中 \(Z_j\) 看起来是一个合理的 latent representation，只是不是当前用户自己的。
-
-如果：
-
-```text
-P(y_i | H_i, Z_i)
-≈
-P(y_i | H_i, Z_j)
-```
-
-说明 latent representation 并没有承载真正用户专属的推理信息。
-
-## 7.5 Latent Mask / Component Intervention
-
-如果未来扩展到：
-
-\[
-Z=\{z_1,\ldots,z_K\}
-\]
-
-可以逐个 mask：
-
-```text
-Z \ z_k
-```
-
-观察每个 latent component 对推荐候选集合的影响。
-
----
-
-# 8. 新的评价指标
-
-传统 HR@K、NDCG@K 保留，同时增加机制指标。
-
-## 8.1 Necessity Gap
-
-\[
-NG@K =
-HR@K_{\text{normal}}
--
-HR@K_{\text{zero}}
-\]
-
-意义：latent 是否是模型完成推荐所需要的信息。
-
-## 8.2 Personalization Gap
-
-\[
-PG@K =
-HR@K_{\text{normal}}
--
-HR@K_{\text{matched-shuffle}}
-\]
-
-意义：latent 是否包含当前用户特有的信息。
-
-## 8.3 Shuffle Gap
-
-\[
-SG@K =
-HR@K_{\text{normal}}
--
-HR@K_{\text{shuffle}}
-\]
-
-## 8.4 Distribution Sensitivity
-
-不仅比较 target rank，还比较完整输出分布：
-
-\[
-D_{KL}
-\left(
-P(\cdot|H,Z)
-\|
-P(\cdot|H,\tilde Z)
-\right)
-\]
-
-## 8.5 Candidate Shift
-
-对 Top-K recommendation set 做：
-
-- Jaccard similarity；
-- rank correlation；
-- category shift；
-- semantic displacement。
-
-目标不是简单证明“变了”，而是判断替换 latent 是否产生稳定、个性化、语义合理的 candidate shift。
-
----
-
-# 9. Proposed Method：Causal Utilization Regularization
-
-第一版模型应该刻意保持简单：
-
-```text
-            ┌──────────────→ Generator
-            │
-History ────┤
-            │
-            ↓
-      Small Reasoner
-            ↓
-            Z
-            │
-            └──────────────→ Gated Fusion
-```
-
-初始阶段建议：
-
-```text
-K = 1
-```
-
-原因：如果单个 latent vector 都无法被模型可靠利用，那么直接研究 K=4 multi-intent 没有意义。
-
----
-
-# 10. 基础推荐目标
-
-\[
-\mathcal L_{rec}
-=
--\log P(y|H,Z)
-\]
-
----
-
-# 11. Utilization Loss
-
-希望：
-
-```text
-correct latent
+$$
+\log P(y_i \mid H_i, Z_i)
 >
-matched counterfactual latent
-```
+\log P(y_i \mid H_i, \tilde Z_i)
+$$
 
-定义：
+### H3 — Utilization Can Be Trained
 
-\[
-\mathcal L_{util}
+如果我们显式优化“正确 latent 应带来额外预测增益，而错误 latent 应回退到 baseline”，就有可能让 latent reasoning 从 auxiliary representation 变成真正的 decision pathway。
+
+---
+
+# 3. CURE Framework
+
+## 3.1 总体结构
+
+第一版 CURE 故意保持简单：
+
+~~~text
+                   ┌────────────────────────────┐
+                   │     Base Generator G       │
+                   │   Qwen + SID Generation    │
+                   └─────────────┬──────────────┘
+                                 │
+History H ──────── Backbone Hidden States
+                                 │
+                                 ├─────────────── direct path
+                                 │
+                                 ↓
+                         Latent Reasoner R
+                                 │
+                                 ↓
+                              Z (K=1)
+                                 │
+                                 ↓
+                           Gated Fusion
+                                 │
+                                 ↓
+                         SID Prediction
+~~~
+
+第一阶段只做 $K=1$。
+
+原因很简单：
+
+> 如果一个 latent 都无法被稳定利用，那么研究 K=4 multi-intent 没有可靠基础。
+
+后续只有在 K=1 utilization 成立后，才进入 multi-intent / functional diversity。
+
+---
+
+## 3.2 Base Recommendation Loss
+
+正常推荐目标：
+
+$$
+\mathcal{L}_{rec}
+=
+-\log P(y \mid H, Z)
+$$
+
+这里 $y$ 是目标商品对应的 SID 序列。
+
+---
+
+## 3.3 Counterfactual Latent
+
+对样本 $i$，构造另一个 latent：
+
+$$
+\tilde Z_i = Z_j,\quad j \neq i
+$$
+
+但 $j$ 不应该完全随机。
+
+优先使用 matched counterfactual：
+
+- 相似 history length；
+- 相似 target popularity；
+- 相似 baseline difficulty；
+- 可选：相同 coarse category；
+- 但来自不同用户 / 不同 history。
+
+这样避免 reviewer 质疑：
+
+> 随机 latent 只是 OOD noise，性能下降并不能证明 personalization。
+
+---
+
+## 3.4 Utilization Loss
+
+希望正确 latent 比 matched counterfactual latent 更有帮助：
+
+$$
+\mathcal{L}_{util}
 =
 \max
 \left(
-0,
-m
+0,\;
+m -
+\left[
+\log P(y \mid H,Z)
 -
-[
-\log P(y|H,Z)
--
-\log P(y|H,\tilde Z)
-]
+\log P(y \mid H,\tilde Z)
+\right]
 \right)
-\]
+$$
 
-其中：
+它训练的是：
 
-\[
-\tilde Z = Z_{\text{matched user}}
-\]
+> correct latent should provide useful personalized information.
 
-含义：当前用户自己的 latent 必须比“另一个看起来同样合理的用户 latent”更有助于预测当前 target。
+而不是：
 
----
-
-# 12. 为什么单独使用 Utilization Loss 会有漏洞
-
-模型可能作弊：不是把 correct latent 做得更好，而是故意把 wrong latent 做得极差。
-
-例如：
-
-```text
-correct Z → normal
-wrong Z   → intentionally corrupted prediction
-```
-
-于是 utilization margin 很大，但这并不代表 latent 真正提供了有用信息。
+> latent should look like some teacher embedding.
 
 ---
 
-# 13. Baseline Anchor
+## 3.5 Baseline Anchor
 
-先训练 / 冻结一个普通 SFT baseline：
+单独使用 utilization margin 有一个漏洞：
 
-\[
-P_0(y|H)
-\]
+模型可以通过“故意破坏 counterfactual branch”获得很大的 margin。
 
-对于 counterfactual latent \(\tilde Z\)，要求模型尽量回到 baseline，而不是崩坏：
+因此先准备普通 SFT baseline：
 
-\[
-\mathcal L_{anchor}
+$$
+P_0(\cdot \mid H)
+$$
+
+对于 counterfactual latent，希望模型回退到 baseline，而不是崩坏：
+
+$$
+\mathcal{L}_{anchor}
 =
 D_{KL}
 \left(
-P(\cdot|H,\tilde Z)
-\|
-P_0(\cdot|H)
+P(\cdot \mid H,\tilde Z)
+\;\|\;
+P_0(\cdot \mid H)
 \right)
-\]
+$$
 
-训练目标变成：
+直觉是：
 
-```text
+~~~text
 No useful latent
       ↓
 baseline-like prediction
 
 Correct personalized latent
       ↓
+additional useful information
+      ↓
 better prediction
-```
-
-而不是：
-
-```text
-correct latent → normal
-wrong latent   → destroyed
-```
+~~~
 
 ---
 
-# 14. Difficulty-aware Utilization
+## 3.6 CURE Objective
 
-并非所有样本都需要 latent reasoning。
+第一版只保留三个 loss：
 
-例如：
-
-```text
-history:
-牙膏 → 牙膏 → 牙膏 → 牙膏
-
-target:
-牙膏
-```
-
-baseline 已经极度确定。如果强迫 latent 对这种样本必须产生巨大贡献，模型会制造 artificial dependency。
-
-因此可用 baseline difficulty：
-
-\[
-w_i = 1-P_0(y_i|H_i)
-\]
-
-或使用：
-
-- baseline entropy；
-- target rank；
-- margin；
-- confidence。
-
-得到：
-
-\[
-\mathcal L_{util}
+$$
+\mathcal{L}_{CURE}
 =
-w_i
-\cdot
-\max
-\left(
-0,
-m-
-[
-\log P(y|H,Z)
--
-\log P(y|H,\tilde Z)
-]
-\right)
-\]
-
-这样：
-
-```text
-easy sample:
-latent 可以没有明显贡献
-
-hard sample:
-latent 应该提供额外 personalized information
-```
-
-注意：这不应包装成 “adaptive compute”。真正的 contribution 是：
-
-> **selective causal usefulness**
-
----
-
-# 15. 最终训练目标
-
-第一版控制在三个 loss：
-
-\[
-\boxed{
-\mathcal L
-=
-\mathcal L_{rec}
+\mathcal{L}_{rec}
 +
-\lambda_u\mathcal L_{util}
+\lambda_u \mathcal{L}_{util}
 +
-\lambda_a\mathcal L_{anchor}
-}
-\]
+\lambda_a \mathcal{L}_{anchor}
+$$
 
-第一版不要加入：
+暂时不要加入：
 
+- CoT distillation；
 - diversity loss；
-- CoT MSE；
+- K=4；
 - GRPO；
-- posterior/prior；
-- K=4；
-- complex routing；
-- multi-stage semantic hierarchy。
+- posterior-prior；
+- complex SID routing；
+- 多层人工 semantic reasoning。
 
-先证明：
-
-> **一个 latent representation 能否稳定地成为模型决策真正使用的信息通路。**
+如果最小机制都没有建立，复杂模块只会让问题更难定位。
 
 ---
 
-# 16. 最小实验矩阵
+# 4. Intervention-Based Evaluation
 
-| Model | Rec Loss | Latent | Utilization Loss | Anchor | Zero | Shuffle | Matched Shuffle |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| SFT | ✓ | – | – | – | – | – | – |
-| Latent | ✓ | ✓ | – | – | ✓ | ✓ | ✓ |
-| + Util | ✓ | ✓ | ✓ | – | ✓ | ✓ | ✓ |
-| + Util + Anchor | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+CURE 的 evaluation 不替代 HR / NDCG，而是在它们之外回答：
 
-理想现象不是单纯：
+> 模型是否真的依赖当前 latent？
 
-```text
-HR@10:
-2.84 → 3.20
-```
-
-而是：
-
-```text
-SFT                     2.84
-
-Latent                  2.90
-Latent-zero             2.89
-→ latent bypass
-
-Util                    3.10
-Util-zero               2.84
-Util-shuffle            2.85
-Util-matched-shuffle    2.86
-→ latent causally utilized
-```
-
-这样的结果在机制上比单纯 accuracy gain 更有说服力。
+对于同一个训练好的模型、同一个 history $H$，只改变 latent。
 
 ---
 
-# 17. 如果 K=1 成功，再扩展 Multi-Intent
+## 4.1 Normal
 
-之后才考虑：
+$$
+P(y \mid H,Z)
+$$
 
-\[
-Z=\{z_1,\ldots,z_K\}
-\]
+正常推理。
 
-此时不再使用简单的：
+## 4.2 Zero Latent
 
-\[
-\cos(z_i,z_j)<m
-\]
+$$
+Z \rightarrow 0
+$$
 
-来定义 diversity。
+测试 latent pathway 是否必要。
 
-因为：
+## 4.3 Random Latent
 
-> representation 不同 ≠ function 不同。
+$$
+Z \rightarrow \epsilon
+$$
 
-真正值得研究的是 **Functional Diversity**。
+测试模型是否对 latent input 敏感。
 
-例如逐个移除：
+## 4.4 Global Shuffle
 
-\[
-P(y|H,Z)
-\neq
-P(y|H,Z_{\setminus k})
-\]
+$$
+Z_i \rightarrow Z_j
+$$
 
-以及不同 \(z_k\) 的 intervention 是否影响不同 recommendation candidate subsets。
+测试 latent 是否只是通用 bias。
 
-如果：
+## 4.5 Matched Counterfactual Shuffle
 
-```text
-mask z1
-→ category A candidates disappear
+$$
+Z_i \rightarrow Z_{\text{matched}(j)}
+$$
 
-mask z2
-→ category B candidates disappear
-```
-
-才能更有力地声称不同 latent components 对应不同 functional intent。
+测试 latent 是否携带当前用户专属信息。
 
 ---
 
-# 18. 可以保留的 MIR 部分
+# 5. 核心诊断指标
 
-MIR 不必完全废弃。
+传统推荐指标继续报告：
 
-可以保留：
+- HR@K
+- NDCG@K
 
-```text
-History
-  ↓
-Latent / Intent Encoder
-  ↓
-Z
-  ↓
-Gated Fusion
-  ↓
-Generator
-```
+除此之外增加机制指标。
 
-但暂时放弃以下 headline：
+### Necessity Gap
 
-- multi-intent；
-- dynamic SID routing；
-- K=4；
-- diversity loss。
-
-MIR 可以退化成一个最简单的 latent-reasoning testbed。
-
----
-
-# 19. 当前 MIR / 实验系统必须先修的问题
-
-## 19.1 MIR inference path
-
-过去实验中存在：
-
-- MIR module 训练后，没有被当前 evaluator 正确加载；
-- evaluator 只加载普通 `AutoModelForCausalLM`；
-- zero / shuffle / gate-zero 结果完全相同；
-- 当前 repo 中缺少可审计的 MIR implementation。
-
-因此新版本需要：
-
-```text
-MIR / Latent model
-作为完整 nn.Module 保存
-      ↓
-完整 reload
-      ↓
-generate()
-必须实际调用 latent pathway
-```
-
-并加入 unit test：
-
-```text
-normal Z logits
-≠
-zero Z logits
-
-normal Z logits
-≠
-shuffle Z logits
-```
-
-## 19.2 Test History Bug
-
-当前数据逻辑：
-
-```text
-train = all except last two
-valid = second last
-test  = last
-```
-
-但 test inference history 使用的仍然只是 `train history`，因此漏掉 validation item。
-
-标准 sequential evaluation 应改成：
-
-```text
-Validation:
-history = train
-target  = valid
-
-Test:
-history = train + valid
-target  = test
-```
-
-这个 bug 特别容易伤害依赖“近期意图”的模型。
-
-## 19.3 Baseline Version Drift
-
-过去项目中已经出现过：
-
-- SFT v1 / SFT v2 混用；
-- RQ-VAE codebook 改变；
-- checkpoint 起点不一致；
-- CoT 实验曾错误加载 base Qwen 而非 SFT checkpoint。
-
-因此新的实验必须固定：
-
-- dataset；
-- user split；
-- item index；
-- RQ-VAE；
-- SID tokenizer；
-- base checkpoint；
-- decoding strategy；
-- evaluation users；
-- random seed；
-- beam size；
-- git SHA；
-- artifact hash。
-
-## 19.4 SID Collision
-
-当前 RQ-VAE SID 存在 collision。
-
-如果 item A / item B 拥有相同 SID，evaluation 仅按 SID 判断 hit，那么模型不能区分真正 item identity。
-
-这会产生：
-
-```text
-SID-level accuracy
-≠
-item-level accuracy
-```
-
-长期建议：
-
-- 加 unique suffix token；
-- 或使用 atomic collision-resolving token；
-- 或至少同时报告 item-level collision-aware metric。
-
----
-
-# 20. 为什么 Future Posterior → History Prior 不适合作为唯一 headline
-
-曾考虑：
-
-\[
-q(Z|H,\text{Future})
-\rightarrow
-p(Z|H)
-\]
-
-训练时 posterior 看未来行为：
-
-```text
-t+1
-t+2
-t+3
-```
-
-然后蒸馏到 history-only prior。
-
-这个想法仍然有价值，尤其适合解决一个 next-item 无法监督 K 个 intent 的问题。
-
-但类似 future-aware posterior、history prior、future behavior teacher distillation 已经存在相关工作。因此更适合作为：
-
-> 后续组件 / multi-intent extension
-
-而不是核心 novelty。
-
----
-
-# 21. 论文最适合的主线
-
-## Proposed Title 1
-
-**Does Latent Reasoning Really Matter? Causally Faithful Reasoning for Generative Recommendation**
-
-## Proposed Title 2
-
-**Learning Causally Utilized Latent Reasoning for Generative Recommendation**
-
-## Proposed Title 3
-
-**When Latent Reasoning Matters: Interventional Learning for Generative Recommendation**
-
----
-
-# 22. Introduction 的核心逻辑
-
-1. Generative recommendation 越来越多地引入 latent reasoning；
-2. 现有工作关注 reasoning depth、semantic alignment、multi-path reasoning、adaptive computation、fine-grained reward；
-3. 但一个被忽略的问题是：
-
-> **well-aligned latent representation 并不代表 latent state causally drives prediction。**
-
-4. 模型可能同时学到：
-
-```text
-History → Item
-```
-
-和：
-
-```text
-History → Latent
-```
-
-但两条路径之间只有弱联系。
-
-5. 因此提出：
-
-> **Does the recommender actually use what it reasons?**
-
-6. 用 interventional evaluation 测量 latent necessity / personalization；
-7. 用 utilization regularization + baseline anchor 训练真正被模型读取的 latent states。
-
----
-
-# 23. 建议的三条论文贡献
-
-### Contribution 1 — Problem
-
-首次系统研究 generative recommendation 中的：
-
-> **latent reasoning 的 causal utilization**
-
-区别于传统的 accuracy、representation alignment、auxiliary target prediction 和 reasoning-step likelihood gain。
-
-### Contribution 2 — Evaluation
-
-提出 intervention-based evaluation protocol：
-
-- zero latent；
-- random latent；
-- shuffle latent；
-- matched-counterfactual latent；
-- component mask。
-
-并定义：
-
-- Necessity Gap；
-- Personalization Gap；
-- Distribution Sensitivity；
-- Candidate Shift。
-
-### Contribution 3 — Method
-
-提出 lightweight **Causal Utilization Regularization**，使：
-
-```text
-correct personalized latent
-→ improvement over baseline
-
-wrong / counterfactual latent
-→ baseline-like behavior
-```
-
-避免：
-
-```text
-wrong latent
-→ intentionally broken model
-```
-
----
-
-# 24. Potential Reviewer Objections
-
-## Q1. 这不就是 robustness test？
-
-不是。普通 robustness 关心 noise 后模型是否仍然稳定；这里关心 latent pathway 是否真的携带决策必要的信息。
-如果 latent 在 zero / matched-shuffle 后完全不影响结果，说明该 pathway 很可能被 bypass。
-
-## Q2. 这不就是 ablation？
-
-普通 ablation：
-
-```text
-remove module
-retrain
-```
-
-研究的是 architecture 是否有帮助。
-
-这里：
-
-```text
-same trained model
-same H
-intervene Z
-```
-
-研究的是给定同一个模型，其 prediction 是否依赖当前 latent state。
-
-## Q3. 这不就是 HiLaR 的 marginal gain？
-
-不是。HiLaR 风格是：
-
-\[
-P(y|H,z_{1:k})
+$$
+NG@K
+=
+HR@K_{normal}
 -
-P(y|H,z_{1:k-1})
-\]
+HR@K_{zero}
+$$
 
-这里强调：
+### Shuffle Gap
 
-\[
-P(y|H,Z)
-\quad vs. \quad
-P(y|H,\operatorname{do}(Z=\tilde Z))
-\]
+$$
+SG@K
+=
+HR@K_{normal}
+-
+HR@K_{shuffle}
+$$
 
-尤其是 matched personalized counterfactual intervention。
+### Personalization Gap
 
-## Q4. 为什么 wrong latent 一定应该差？
+$$
+PG@K
+=
+HR@K_{normal}
+-
+HR@K_{matched}
+$$
 
-不要求所有 wrong latent 都大幅变差。
+### Distribution Sensitivity
 
-利用 difficulty weighting、baseline anchor、matched counterfactual，只要求：
+$$
+DS
+=
+D_{KL}
+\left(
+P(\cdot \mid H,Z)
+\;\|\;
+P(\cdot \mid H,\tilde Z)
+\right)
+$$
 
-> 对真正需要额外 personalized information 的样本，正确 latent 应提供比不匹配 latent 更稳定的增益。
+还可以记录：
 
----
+- Top-K Jaccard；
+- rank correlation；
+- target-rank change；
+- category / semantic candidate shift。
 
-# 25. 风险
+重要提醒：
 
-## 风险 1：所有 latent 模型本来就能通过 intervention
+> 这些指标应描述为 **interventional utilization metrics**。  
+> “causal” 是研究动机和 intervention 视角，但除非后续给出严格 SCM / identification assumptions，不应把结果表述成强因果效应估计。
 
-如果大多数 baseline：
-
-```text
-Normal >> Zero / Shuffle
-```
-
-那么“latent bypass”问题可能不普遍。
-
-解决：重点转向 personalization faithfulness / matched counterfactual sensitivity。
-
-## 风险 2：Utilization Loss 提高 dependency 但降低 accuracy
-
-可能出现：
-
-```text
-NG ↑
-PG ↑
-HR ↓
-```
-
-说明模型学会依赖 latent，但 latent 本身质量不足。
-
-这会产生一个新的研究问题：
-
-> utilization 与 information quality 之间的 trade-off。
-
-## 风险 3：matched counterfactual 定义不够严谨
-
-需要设计多个 matching protocol：
-
-- same category；
-- same popularity bin；
-- same history length；
-- same baseline confidence；
-- embedding-nearest history。
-
-并做 robustness analysis。
-
-## 风险 4：只有一个数据集有效
-
-至少应该准备多个公开序列推荐数据集。
-
-理想情况：
-
-- Amazon Beauty；
-- Amazon Sports / Toys；
-- MovieLens / Yelp / Steam 中适合生成式推荐的至少一个。
+这样可以减少 reviewer 对 causal terminology 的攻击。
 
 ---
 
-# 26. 推荐实验顺序
+# 6. 清晰研究路线：Phase 0 → Phase 5
 
-## Phase 0 — 修复实验平台
+下面是建议真正执行的项目顺序。
 
-先完成：
+---
 
-- test history 修复；
-- MIR/latent inference path；
-- checkpoint save/load；
-- zero/shuffle unit test；
-- baseline artifact freezing。
+## Phase 0 — Baseline Sanitation & Reproducibility
 
-## Phase 1 — K=1 Latent Diagnostic
+### 目标
 
-只训练：
+建立一个可信、冻结、后续所有实验都不会再改变的 TIGER/Qwen baseline。
 
-```text
-SFT
-Latent
-```
+### 必须完成
 
-先回答：
+1. 修复 leave-two-out evaluation：
+   - validation：history = train，target = valid；
+   - test：history = train + valid，target = test。
+2. 确认 RQ-VAE / SID tokenizer / Qwen SFT / evaluator 从头到尾可跑。
+3. 固定：
+   - dataset version；
+   - preprocessing；
+   - item mapping；
+   - RQ-VAE checkpoint；
+   - item.index.json；
+   - tokenizer；
+   - SFT starting model；
+   - random seed；
+   - beam size；
+   - sample IDs。
+4. result JSON 记录：
+   - git commit SHA；
+   - model/config identifier；
+   - seed；
+   - data split；
+   - evaluation settings。
+5. 明确 SID collision rate，并决定：
+   - 至少同时报告 SID-level metric；
+   - 后续是否增加 collision-aware item-level evaluation。
 
-> 普通 latent module 是否真的被使用？
+### 数据集策略
 
-## Phase 2 — Intervention Benchmark
+不要一开始铺太开。
 
-增加：
+Phase 0 先只用：
+
+- Amazon Beauty
+
+等 pipeline 固定后，再复制到：
+
+- Amazon Sports；
+- Amazon Toys。
+
+### 交付物
+
+- 一个冻结 SFT baseline；
+- 一个固定 RQ-VAE / item index；
+- baseline evaluation JSON；
+- reproducibility README；
+- basic smoke tests。
+
+### Go / No-Go
+
+只有当同一 checkpoint 重复评测结果稳定，并且完整 pipeline 可复现时，才进入 Phase 1。
+
+---
+
+## Phase 1 — Minimal Latent Pathway
+
+### 目标
+
+先回答一个最基本的问题：
+
+> 普通 CE 训练下，一个 K=1 latent pathway 会不会自然被 generator 使用？
+
+### 实现
+
+新增：
+
+~~~text
+src/models/cure/
+    model.py
+    reasoner.py
+    losses.py
+~~~
+
+第一版：
+
+- K = 1；
+- 一个 lightweight Transformer / pooling reasoner；
+- latent $Z$ 只依赖 history；
+- 用 gated residual fusion 接入 generator；
+- 不使用 CoT；
+- 不使用 utilization loss；
+- 不使用 multi-intent。
+
+### 必须做的 unit tests
+
+1. gate = 0 时，logits 应接近 SFT baseline；
+2. normal Z 与 zero Z logits 应可区分；
+3. normal Z 与 shuffle Z logits 应可区分；
+4. save → reload 后输出一致；
+5. generation 时 latent pathway 必须真的被调用。
+
+### 实验
+
+只比较：
+
+| Model | 作用 |
+|---|---|
+| SFT | 无 latent baseline |
+| Latent-CE | K=1，只用 recommendation CE |
+
+然后对 Latent-CE 跑：
+
+- normal；
+- zero；
+- random；
+- shuffle。
+
+### 关键问题
+
+可能出现三种结果。
+
+**A. Latent-CE 提升 accuracy，zero/shuffle 明显下降**
+
+说明自然 utilization 已经存在。后续重点转向 personalization / matched counterfactual。
+
+**B. Latent-CE 提升 accuracy，但 zero/shuffle 几乎不变**
+
+这是最理想的 CURE motivation：存在 latent bypass / weak utilization。
+
+**C. Latent-CE 连 accuracy 都不提升**
+
+先不要做 CURE loss。需要检查 latent representation / fusion 是否本身无效。
+
+### 交付物
+
+- 最小 K=1 latent model；
+- intervention hooks；
+- 第一张 utilization diagnostic table。
+
+### Go / No-Go
+
+至少要证明：
+
+- latent pathway 工程上确实参与 forward；
+- intervention 能稳定测量变化；
+- Latent-CE 不出现明显训练/推理错位。
+
+---
+
+## Phase 2 — CURE Diagnostic Protocol
+
+### 目标
+
+把“latent 是否被使用”从单次 ablation 变成一个稳定 protocol。
+
+### 新增 intervention
 
 - zero；
 - random；
-- shuffle；
+- global shuffle；
 - matched shuffle。
 
-分析：
+### Matched Counterfactual v1
 
-- HR；
-- NDCG；
-- Necessity Gap；
-- Personalization Gap；
-- candidate-set shift。
+先用简单可控条件：
 
-## Phase 3 — Utilization Training
+- history length bin；
+- target popularity bin；
+- baseline confidence bin。
 
-加入 \(L_{util}\)，然后加入 \(L_{anchor}\)。
+如果 metadata 可靠，再增加：
 
-验证：
+- category matching。
 
-```text
-accuracy ↑
-causal utilization ↑
-```
+### 实验范围
 
-是否能同时成立。
+这一阶段仍然不要复现十个 baseline。
 
-## Phase 4 — Difficulty-aware Utilization
+优先：
 
-按 baseline uncertainty 分桶：
+1. SFT；
+2. Latent-CE；
+3. 如果工程成本可接受，再选 **1 个最兼容的公开 latent-reasoning baseline**。
 
-```text
-easy
-medium
-hard
-```
+目的不是立即建立 benchmark，而是确认 protocol 能区分不同 utilization behavior。
 
-看 latent utilization 是否主要集中在 hard cases。
+### 期望发现
 
-## Phase 5 — Multi-intent Extension
+例如：
 
-只有 Phase 1–4 成功后再扩展：
+~~~text
+Model A
+Normal ≈ Zero ≈ Shuffle
+→ latent bypass
 
-```text
-K = 2 / 4
-```
+Model B
+Normal > Zero
+Normal ≈ Matched Shuffle
+→ latent 有信息，但 personalization 弱
 
-研究 functional diversity，而不是 representation diversity。
+Model C
+Normal > Matched Shuffle > Zero
+→ latent 同时具有必要性和个性化信息
+~~~
 
----
+### 交付物
 
-# 27. 当前最重要的研究原则
+- intervention evaluator；
+- NG / SG / PG；
+- matched-counterfactual sampler；
+- utilization behavior taxonomy。
 
-这次项目应该坚持一个原则：
+### Go / No-Go
 
-> **一次只改变一个核心问题。**
+如果所有模型 normal / zero / shuffle 都高度一致：
 
-过去的问题是同时改变：
+- 说明这个问题很强，继续 Phase 3。
 
-```text
-Reasoning representation
-Reasoning supervision
-Reasoning injection
-SID quality
-training procedure
-evaluation protocol
-```
+如果所有模型天然都有很强 utilization：
 
-六个变量同时变化以后，即使结果提升或下降，也无法知道原因。
-
-新的研究路线应该依次回答：
-
-```text
-1. latent 是否真的被使用？
-2. 能否主动提高 utilization？
-3. utilization 是否提高 accuracy？
-4. 哪些样本真正需要 latent？
-5. 多个 latent 是否具有不同 functional role？
-```
+- 不再强调 “latent bypass”；
+- 转向 “personalized faithfulness / functional specificity”。
 
 ---
 
-# 28. 对 MIR 的最终定位
+## Phase 3 — CURE Training Framework
 
-当前最合理的处理方式不是继续“修 MIR”，也不是完全推倒重来。
+### 目标
+
+从“测量 utilization”进入真正的方法贡献：
+
+> 能否通过训练主动让 latent 成为有用的 decision pathway？
+
+### 模型
+
+保持 Phase 1 的 K=1 architecture 不变。
+
+只加入：
+
+$$
+\mathcal{L}_{rec}
++
+\lambda_u \mathcal{L}_{util}
+$$
+
+然后再加入：
+
+$$
++\lambda_a \mathcal{L}_{anchor}
+$$
+
+### 核心 ablation
+
+| Variant | Rec | Util | Anchor |
+|---|---:|---:|---:|
+| SFT | ✓ | – | – |
+| Latent-CE | ✓ | – | – |
+| CURE-U | ✓ | ✓ | – |
+| CURE-UA | ✓ | ✓ | ✓ |
+
+### 成功标准
+
+不能只看 PG / NG 增大。
+
+真正理想的是：
+
+~~~text
+Recommendation accuracy      ↑ or at least not degraded
+Necessity / Personalization  ↑
+Counterfactual branch        remains baseline-like
+~~~
+
+### 失败模式
+
+如果：
+
+~~~text
+PG ↑
+NG ↑
+HR ↓
+~~~
+
+说明模型只是被强迫依赖 latent，而 latent 信息质量不足。
+
+此时优先改 latent representation，不要继续加更强 utilization penalty。
+
+### 交付物
+
+- CURE loss；
+- training code；
+- lambda ablation；
+- mechanism + accuracy joint analysis。
+
+### Go / No-Go
+
+在 Beauty 上至少满足：
+
+- accuracy 不明显低于 Latent-CE；
+- PG / NG 中至少一个稳定改善；
+- matched counterfactual 不通过“故意破坏输出”获得 margin。
+
+否则暂停后续复杂化。
+
+---
+
+## Phase 4 — Selective Utilization
+
+### 目标
+
+回答：
+
+> latent reasoning 应该在哪些样本上真正有用？
+
+不是做 adaptive inference depth，而是研究 **selective usefulness**。
+
+### Difficulty Weight
+
+使用冻结 baseline：
+
+$$
+w_i = 1 - P_0(y_i \mid H_i)
+$$
+
+或：
+
+- entropy；
+- target rank；
+- top-1 / top-2 margin。
+
+然后：
+
+$$
+\mathcal{L}_{util}^{weighted}
+=
+w_i \cdot \mathcal{L}_{util}
+$$
+
+### 分桶分析
+
+按 baseline difficulty 分为：
+
+- easy；
+- medium；
+- hard。
+
+分别报告：
+
+- HR/NDCG gain；
+- NG；
+- PG；
+- gate magnitude；
+- distribution shift。
+
+### 关键问题
+
+我们不应该要求简单样本也产生人工 latent dependency。
+
+真正想看到的是：
+
+> hard samples 获得更明显的 utilization gain，而 easy samples 接近 baseline。
+
+### 交付物
+
+- difficulty-aware CURE；
+- easy/medium/hard analysis；
+- utilization-vs-difficulty figure。
+
+---
+
+## Phase 5 — Generalization, Baselines & Paper-Scale Validation
+
+这一阶段才开始扩展工作量。
+
+### 5.1 多数据集
+
+至少：
+
+- Amazon Beauty；
+- Amazon Sports；
+- Amazon Toys。
+
+如果时间和算力允许，再考虑一个非 Amazon 数据集。
+
+### 5.2 外部 Baselines
+
+不要追求数量。
+
+建议按“范式代表性”选择 2–3 个：
+
+- 一个基础 generative recommender；
+- 一个 latent reasoning recommender；
+- 一个较新的 multi-step / adaptive latent reasoning 方法。
+
+优先选择：
+
+- 有公开代码；
+- 数据接口能适配；
+- latent state 可以被 intervention；
+- 不需要极高训练成本。
+
+### 5.3 两种论文规模
+
+#### Method-first paper
+
+如果 CURE training 明显提高：
+
+- accuracy；
+- NG / PG；
+- hard-case performance；
+
+那么主线是：
+
+> **CURE is a new framework for learning causally utilized latent reasoning.**
+
+Evaluation protocol 是 supporting contribution。
+
+#### Evaluation-first paper
+
+如果我们发现大量 latent-reasoning models 都存在显著 utilization gap，但 CURE 方法提升有限：
+
+主线可以变成：
+
+> **Current latent-reasoning recommenders may not use what they reason.**
+
+这时需要更多 baselines，工作量更大，但 research contribution 更偏 benchmark / methodology。
+
+### 推荐优先级
+
+**优先争取 Method-first。**
+
+因为这样不需要一开始就复现大量外部模型，也更适合当前时间和工程条件。
+
+---
+
+# 7. Multi-Intent 什么时候回来？
+
+只有 Phase 3–4 成功后再重新考虑 K > 1。
+
+此时不再使用简单的 cosine diversity：
+
+$$
+\cos(z_i,z_j) < m
+$$
+
+而研究 **functional diversity**。
+
+例如：
+
+$$
+P(y \mid H,Z)
+\neq
+P(y \mid H,Z_{\setminus k})
+$$
+
+并检查 mask 不同 latent 后是否影响不同 candidate subsets。
+
+理想现象：
+
+~~~text
+mask z1
+→ 一组候选明显下降
+
+mask z2
+→ 另一组候选明显下降
+~~~
+
+只有这种 functional specialization 出现后，才重新使用 “multi-intent” 这个 claim。
+
+---
+
+# 8. 最小论文实验矩阵
+
+第一篇 CURE 论文最小可以控制在：
+
+| Group | Experiments |
+|---|---|
+| Baseline | SFT |
+| Architecture | Latent-CE |
+| Method | CURE-U / CURE-UA |
+| Intervention | normal / zero / random / shuffle / matched |
+| Difficulty | easy / medium / hard |
+| Dataset | Beauty → Sports → Toys |
+| External model | 先 1 个，最终视结果扩到 2–3 个 |
+
+这样不会一开始把项目做成一个庞大的 benchmark 工程。
+
+---
+
+# 9. 当前最重要的工程原则
+
+### 9.1 一次只改变一个变量
+
+不要再同时修改：
+
+- latent representation；
+- fusion；
+- loss；
+- tokenizer；
+- decoding；
+- evaluation protocol。
+
+### 9.2 每个新模块必须有 intervention test
+
+任何 latent 模块合入主实验前必须回答：
+
+- zero 它会怎样？
+- shuffle 它会怎样？
+- reload 后还会怎样？
+- generation 时它真的执行了吗？
+
+### 9.3 新实验必须记录 artifact identity
+
+每个结果至少记录：
+
+- git SHA；
+- dataset；
+- RQ-VAE / item index identity；
+- tokenizer；
+- model checkpoint；
+- seed；
+- decoding config。
+
+### 9.4 机制提升不能代替推荐效果
+
+CURE 的目标不是制造依赖。
+
+最终必须同时关心：
+
+> utility + utilization
+
+而不是只把 NG / PG 做得很大。
+
+---
+
+# 10. 主要风险与预案
+
+### 风险 A：naive latent 本来就有很强 utilization
+
+那就把研究重点从 necessity 转向：
+
+- personalization；
+- matched counterfactual；
+- functional specificity。
+
+### 风险 B：CURE 让 utilization 提升但 accuracy 下降
+
+说明 latent quality 不足。
+
+优先改善 reasoner / fusion，而不是增大 $\lambda_u$。
+
+### 风险 C：matched counterfactual 设计不严谨
+
+做多个 matching protocol：
+
+- popularity；
+- history length；
+- baseline confidence；
+- category；
+- nearest-history embedding。
+
+### 风险 D：外部 baseline 工作量过大
+
+论文早期只要求一个兼容 baseline。
+
+只有 Method-first 主结果成立后才扩大 baseline 数量。
+
+### 风险 E：“causal” 被 reviewer 质疑
+
+正文中明确区分：
+
+- intervention-based causal motivation；
+- empirical utilization test；
+- formal causal effect estimation。
+
+除非后续建立完整 SCM 与 identification assumptions，否则不要声称估计了严格的 causal effect。
+
+---
+
+# 11. 近期里程碑
+
+### Milestone A — Clean Baseline
+
+完成 Phase 0。
+
+成功标志：
+
+> Beauty SFT pipeline fully reproducible.
+
+### Milestone B — First Mechanism Result
+
+完成 Phase 1–2。
+
+成功标志：
+
+> 能明确画出 Normal / Zero / Shuffle / Matched 的差异。
+
+### Milestone C — CURE Works
+
+完成 Phase 3。
+
+成功标志：
+
+> CURE 相比 Latent-CE 同时改善 utilization，并保持或提高 recommendation accuracy。
+
+### Milestone D — Selective Story
+
+完成 Phase 4。
+
+成功标志：
+
+> hard samples 获得更明显 latent benefit。
+
+### Milestone E — Paper-Scale Evidence
+
+完成 Phase 5。
+
+成功标志：
+
+> 至少 3 个数据集 + 代表性外部 baseline + 完整 ablation。
+
+---
+
+# 12. 投稿时最理想的故事
+
+论文开头可以压成三个问题：
+
+### Q1. Does latent reasoning really influence recommendation?
+
+用 intervention protocol 回答。
+
+### Q2. Is the influence personalized?
+
+用 matched counterfactual 回答。
+
+### Q3. Can we explicitly learn useful latent dependence?
+
+用 CURE framework 回答。
+
+于是论文不再只是：
+
+> 我们提出几个新指标。
+
+也不只是：
+
+> 我们加一个 latent module。
 
 而是：
 
-> **把 MIR 从一个 multi-intent framework，降级为研究 latent utilization 的实验平台。**
-
-保留：
-
-- latent encoder；
-- gated fusion；
-- generative recommendation backbone。
-
-暂时移除：
-
-- dynamic SID routing；
-- K=4；
-- diversity loss；
-- multi-intent claim。
-
-如果 K=1 的 causal utilization 都无法建立，那么原 MIR 中更复杂的 multi-intent 解释没有坚实基础。
+> **We identify a latent-utilization problem, introduce an interventional protocol to measure it, and propose CURE to explicitly learn personalized, useful latent dependence.**
 
 ---
 
-# 29. 最终研究问题
+# 13. Working Contributions
 
-可以把整个项目最终浓缩成一句：
+如果 Phase 3–5 顺利，最终 contribution 可以写成：
 
-> **Can generative recommenders learn latent reasoning states that are not only predictive, but causally necessary and personally relevant to the final recommendation decision?**
+1. **Problem**  
+   提出 latent utilization 这一问题：latent state 可被学习，但未必真正参与推荐决策。
+
+2. **Framework**  
+   提出 **CURE-Rec**，通过 personalized counterfactual utilization regularization 和 baseline anchoring，使 latent reasoning 成为真正有用的 decision pathway。
+
+3. **Evaluation**  
+   提出 intervention-based protocol，区分 latent necessity、generic sensitivity 与 personalized utilization。
+
+4. **Analysis**  
+   研究 utilization 与 sample difficulty、recommendation accuracy、functional specialization 之间的关系。
+
+---
+
+# 14. 当前暂不做的事情
+
+为了防止项目再次失控，Phase 0–3 明确不做：
+
+- explicit CoT generation；
+- teacher CoT distillation；
+- GRPO；
+- K=4 multi-intent；
+- complex dynamic routing；
+- posterior-prior；
+- semantic hierarchy；
+- 大规模 baseline zoo。
+
+这些都只能在核心机制建立以后作为扩展，而不能成为新的起点。
+
+---
+
+# 15. 最终研究问题
+
+> **Can generative recommenders learn latent reasoning states that are not only predictive, but actually utilized and personally relevant to the final recommendation decision?**
 
 中文：
 
-> **生成式推荐模型能否学习不仅“与目标相关”，而且真正对最终推荐决策具有因果贡献和个性化作用的 latent reasoning？**
+> **生成式推荐模型能否学习不仅与目标相关，而且真正被最终推荐决策利用、并具有个性化信息价值的 latent reasoning？**
 
 ---
 
-# 30. 一句话总结
+# 16. 一句话项目原则
 
-不要再追问：
-
-> “怎么设计一个更复杂的 latent reasoning 模块？”
-
-而应该问：
-
-> **“模型究竟有没有在使用它声称学会的 reasoning？”**
-
-如果这个问题能够被系统地测量、证明并优化，它本身就有机会形成一篇比继续堆 MIR 模块更干净、更容易解释、也更有研究价值的论文。
+> **先证明模型真的在用 reasoning，再讨论 reasoning 应该有多少、分成几种、或者有多复杂。**
 
 ---
 
-# 参考方向与近期相关工作
+# 17. 相关工作方向
 
-> 正式写论文前应再次核查最新版本、最终出版信息与具体技术细节。
+正式写论文前需要再次核对最终发表版本和最新工作。
 
-- **ReaRec** — latent / inference-time reasoning for recommendation  
-  https://arxiv.org/abs/2503.22675
-
-- **LARES** — recurrent latent reasoning  
-  https://arxiv.org/abs/2505.16865
-
-- **LatentR³** — latent reasoning + reinforcement learning  
-  https://arxiv.org/abs/2505.19092
-
-- **SCoTER** — structured reasoning transfer / structure preservation  
-  https://arxiv.org/abs/2511.19514
-
-- **S²GR** — semantic supervision for generative reasoning  
-  https://arxiv.org/abs/2601.18664
-
-- **LaRec** — latent reasoning, teacher alignment, multi-path reasoning  
-  https://arxiv.org/abs/2607.24617
-
-- **RecRec** — latent interests + recursive reasoning  
-  https://arxiv.org/abs/2607.12945
-
-- **Where Reasoning Matters / IBA** — SID-position reasoning budget  
-  https://arxiv.org/abs/2607.12425
-
-- **HiLaR** — hierarchical latent reasoning / marginal contribution  
-  https://arxiv.org/abs/2607.27760
-
-- **Semantic ID scaling analysis**  
-  https://arxiv.org/abs/2509.25522
-
-- **UniGRec** — joint / differentiable semantic identifier learning  
-  https://arxiv.org/abs/2601.17438
-
-- **ReSID** — recommendation-native semantic ID  
-  https://arxiv.org/abs/2602.02338
-
-- **AsymRec** — asymmetric continuous input / discrete output formulation  
-  https://arxiv.org/abs/2605.14512
-
-- **SID-MLP** — efficient SID generation  
-  https://arxiv.org/abs/2605.12617
-
-- **GenRec** — efficient industrial generative recommendation  
-  https://arxiv.org/abs/2604.14878
-
-- **RPG** — efficient / parallel semantic-ID generation  
-  https://arxiv.org/abs/2506.05781
-
-- **Recent latent reasoning faithfulness work** — causal intervention / activation patching for hidden reasoning states  
-  https://arxiv.org/abs/2607.06648
+- ReaRec — inference-time / latent reasoning for recommendation
+- LARES — recurrent latent reasoning
+- LatentR³ — latent reasoning + reinforcement learning
+- SCoTER — structured reasoning transfer
+- S²GR — semantic supervision for generative reasoning
+- LaRec — latent reasoning + multi-path reasoning
+- RecRec — latent interests + recursive reasoning
+- IBA / Where Reasoning Matters — reasoning budget allocation
+- HiLaR — hierarchical latent reasoning / marginal contribution
+- ReSID / UniGRec / PIT / AsymRec — Semantic ID / tokenizer research
+- GenPAS — generative recommendation training sample construction
+- General latent-reasoning faithfulness work — intervention / activation patching
 
 ---
 
-## 下一步最值得做的事情
+## Appendix A — Markdown 数学公式约定
 
-1. 修复当前 MIR repo 的 evaluation 闭环；
-2. 构建一个最小 K=1 latent model；
-3. 实现 zero / shuffle / matched-shuffle intervention；
-4. 先跑出一张“latent 到底有没有被使用”的诊断图；
-5. 再决定是否值得实现 Causal Utilization Regularization；
-6. 如果机制成立，再写 Method / Experiments / Ablation；
-7. 最后才扩展 multi-intent。
+为了同时兼容 GitHub Markdown 和现代 VSCode Markdown Preview，本项目统一使用：
 
----
+行内公式：
 
-> **项目新的核心关键词：**
->
-> `Generative Recommendation`  
-> `Latent Reasoning`  
-> `Causal Utilization`  
-> `Interventional Evaluation`  
-> `Faithfulness`  
-> `Matched Counterfactual Latent`  
-> `Selective Utilization`  
-> `Functional Diversity`
+$P(y \mid H,Z)$
+
+块级公式：
+
+$$
+\mathcal{L}
+=
+\mathcal{L}_{rec}
++
+\lambda_u\mathcal{L}_{util}
++
+\lambda_a\mathcal{L}_{anchor}
+$$
+
+不再使用旧文档中的 LaTeX display delimiters：
+
+~~~text
+\[
+...
+\]
+~~~
+
+如果 VSCode 仍不显示数学公式，请确认使用的是 Markdown Preview，而不是纯文本编辑视图，并检查 VSCode 的 Markdown math rendering 设置或相关扩展是否禁用了数学渲染。
