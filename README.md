@@ -37,10 +37,19 @@ The migrated evaluator removes the legacy CoT/thought-query inference dependency
 
 The data-processing split remains leave-two-out; CURE-Rec should keep this protocol explicit in all experiment reports.
 
+## Current status
+
+Phase 0 is in progress. Local preprocessing is complete for:
+
+- Amazon Beauty 2018–2023
+- Amazon Sports 2018–2023
+
+Beauty is the development domain; Sports is the confirmation domain after the baseline recipe is frozen.
+
 ## Next steps
 
-1. Freeze a reproducible SFT baseline.
-2. Fix validation/test history construction.
-3. Add a minimal K=1 latent pathway.
-4. Implement zero / random / shuffle / matched-counterfactual interventions.
-5. Measure causal utilization before adding more complex reasoning modules.
+1. Audit and freeze the processed Beauty / Sports datasets with manifests and hashes.
+2. Build text embeddings and freeze RQ-VAE / SID artifacts, starting with Beauty.
+3. Train and freeze the Beauty Qwen SFT baseline, then reproduce the frozen recipe on Sports.
+4. Run reproducible baseline evaluation and freeze all artifact identities.
+5. Enter Phase 1 with the minimal K=1 latent pathway and intervention tests.
