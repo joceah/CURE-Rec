@@ -1,6 +1,6 @@
 # CURE-Rec Research Plan
 
-> 更新时间：2026-09-30  
+> 更新时间：2026-10-04  
 > Working title: **CURE-Rec: Causal Utilization-Regularized rEasoning for Generative Recommendation**  
 > 核心问题：生成式推荐模型能否学习不仅“与目标相关”，而且真正被最终推荐决策所利用的 latent reasoning？
 
@@ -24,6 +24,38 @@
 - 前期只在自己的 TIGER/Qwen backbone 上验证现象；
 - 只有当现象和方法都成立后，再扩展外部 latent-reasoning baselines；
 - 不在 Phase 0–2 就大规模复现所有近期论文。
+
+### 当前项目状态（2026-10-04）
+
+当前处于 **Phase 0 — Baseline Sanitation & Reproducibility**，其中数据处理子阶段已经完成。
+
+已完成：
+
+- CURE-Rec 仓库从 MIR 迁移出干净的 generative recommendation baseline；
+- leave-two-out test history 已修正为 `train + valid → test`；
+- 本地 `data/processed/` 下已经完成 Amazon **Beauty** 与 **Sports** 两个 domain 的 **2018–2023** 数据处理；
+- 两个 domain 都将作为 CURE-Rec 的正式实验数据，而不是临时 debug 数据。
+
+尚未完成：
+
+- 对 processed data 做统计审计与数据完整性检查；
+- 为两个 domain 固定 dataset manifest / artifact identity；
+- 生成 item text embeddings；
+- 训练并冻结各自的 RQ-VAE / Semantic ID；
+- 训练 Qwen SFT baseline；
+- 跑通可复现的 validation / test evaluation；
+- 冻结 Phase 0 baseline artifacts。
+
+因此项目当前的实际入口不是“重新做数据处理”，而是：
+
+> **从已处理好的 Beauty / Sports 2018–2023 数据出发，完成 baseline artifact 构建、验证与冻结。**
+
+实验推进采用两层结构：
+
+- **Beauty = development domain**：优先用于调通 pipeline、实现 CURE 和做快速 ablation；
+- **Sports = confirmation domain**：在关键设计冻结后复现实验，避免所有结论只依赖单一 domain。
+
+第三个数据集不作为 Phase 0–4 的硬性要求。只有当 CURE 主方法成立并进入 paper-scale validation 后，再决定是否加入 Toys 或其他非 Amazon 数据集。
 
 ---
 
@@ -401,59 +433,262 @@ $$
 
 ### 目标
 
-建立一个可信、冻结、后续所有实验都不会再改变的 TIGER/Qwen baseline。
+建立一个可信、冻结、后续所有 CURE 实验都基于同一协议的 TIGER/Qwen baseline。
 
-### 必须完成
+Phase 0 不再视为一个单一任务，而拆成五个连续子阶段。当前 **0A 已完成，正在进入 0B**。
 
-1. 修复 leave-two-out evaluation：
-   - validation：history = train，target = valid；
-   - test：history = train + valid，target = test。
-2. 确认 RQ-VAE / SID tokenizer / Qwen SFT / evaluator 从头到尾可跑。
-3. 固定：
-   - dataset version；
-   - preprocessing；
-   - item mapping；
-   - RQ-VAE checkpoint；
-   - item.index.json；
-   - tokenizer；
-   - SFT starting model；
-   - random seed；
-   - beam size；
-   - sample IDs。
-4. result JSON 记录：
-   - git commit SHA；
-   - model/config identifier；
-   - seed；
-   - data split；
-   - evaluation settings。
-5. 明确 SID collision rate，并决定：
-   - 至少同时报告 SID-level metric；
-   - 后续是否增加 collision-aware item-level evaluation。
+---
 
-### 数据集策略
+### Phase 0A — Data Processing ✅ 已完成
 
-不要一开始铺太开。
+本地已经完成：
 
-Phase 0 先只用：
+- Amazon Beauty 2018–2023；
+- Amazon Sports 2018–2023。
 
-- Amazon Beauty
+processed artifacts 位于本地 `data/processed/`，大体包括：
 
-等 pipeline 固定后，再复制到：
+- user sequence；
+- validation target；
+- test target；
+- item metadata；
+- raw ID ↔ remapped ID 映射。
 
-- Amazon Sports；
-- Amazon Toys。
+当前采用 leave-two-out sequential protocol：
 
-### 交付物
+~~~text
+train = 除最后两次交互外的历史
+valid = 倒数第二次交互
+test  = 最后一次交互
+~~~
 
-- 一个冻结 SFT baseline；
-- 一个固定 RQ-VAE / item index；
+对应评测必须保持：
+
+~~~text
+Validation:
+history = train
+target  = valid
+
+Test:
+history = train + valid
+target  = test
+~~~
+
+数据本身不要求提交 Git；但它们的生成配置、统计信息和 artifact identity 必须可追踪。
+
+---
+
+### Phase 0B — Processed Data Audit & Freeze ← 当前任务
+
+在继续训练 RQ-VAE 之前，先证明输入数据本身可信。
+
+#### 必查统计
+
+Beauty 与 Sports 分别记录：
+
+- user 数；
+- item 数；
+- interaction 数；
+- valid / test 样本数；
+- sequence length mean / median / P90 / P95 / max；
+- item frequency distribution；
+- user frequency distribution；
+- metadata 缺失率；
+- 过滤后仍无有效 metadata 的 item 数；
+- train / valid / test target 是否全部存在于 item universe。
+
+#### 必查一致性
+
+至少验证：
+
+1. 每个用户的交互严格按 timestamp 排序；
+2. valid 时间不早于 train 最后一次交互；
+3. test 时间不早于 valid；
+4. test target 没有被错误加入训练 target；
+5. remapped user/item ID 连续且映射稳定；
+6. `user_sequences` 只包含 train 部分；
+7. evaluator 在 test 时会把 valid item 补回 history；
+8. 同一 processed dataset 重跑统计结果完全一致。
+
+#### Artifact manifest
+
+为每个 domain 生成一个轻量 manifest，建议记录：
+
+~~~text
+domain
+date_range
+k_core
+n_users
+n_items
+n_interactions
+n_valid
+n_test
+source/config version
+git_sha
+sha256(user_sequences)
+sha256(valid)
+sha256(test)
+sha256(item_meta)
+sha256(id mappings)
+~~~
+
+manifest 可以提交 Git，但原始 / processed 大文件继续留在本地。
+
+#### 交付物
+
+- Beauty data audit summary；
+- Sports data audit summary；
+- 两个 dataset manifest；
+- 固定的 validation / test sample IDs。
+
+#### Go / No-Go
+
+只有当两个 domain 都通过时间顺序、映射、样本数量和 target coverage 检查后，才进入 0C。
+
+---
+
+### Phase 0C — Text Embedding & Semantic ID Artifacts
+
+对每个 domain 独立生成：
+
+~~~text
+item_meta
+   ↓
+Text Encoder
+   ↓
+item_embeddings
+   ↓
+RQ-VAE
+   ↓
+item.index.json
+   ↓
+SID tokenizer
+~~~
+
+先在 Beauty 上跑通，再用冻结配置复制到 Sports。
+
+必须记录：
+
+- embedding model；
+- text fields；
+- embedding dimension；
+- RQ-VAE architecture；
+- codebook size / number of layers；
+- training seed；
+- codebook usage；
+- SID collision rate；
+- max collision group size；
+- checkpoint hash；
+- `item.index.json` hash。
+
+RQ-VAE 的目标不是追求某个单独 reconstruction loss，而是得到稳定、覆盖良好、collision 可接受的推荐输出空间。
+
+#### 交付物
+
+每个 domain：
+
+- item embeddings；
+- frozen RQ-VAE checkpoint；
+- `item.index.json`；
+- SID tokenizer；
+- RQ-VAE diagnostics。
+
+#### Go / No-Go
+
+Beauty 的 SID artifact 先冻结；Sports 使用同一套模型超参跑通后，再进入 0D。
+
+---
+
+### Phase 0D — Qwen SFT Baseline
+
+先训练 Beauty SFT，用它作为所有 Phase 1–4 的主 development baseline。
+
+固定：
+
+- base model；
+- LoRA / full fine-tuning strategy；
+- learning rate；
+- effective batch size；
+- max history length；
+- SID tokenizer；
+- random seed；
+- checkpoint selection rule。
+
+Sports 不用于前期反复调参。
+
+推荐流程：
+
+~~~text
+Beauty:
+pipeline debugging
+→ hyperparameter sanity
+→ freeze SFT recipe
+
+Sports:
+reuse frozen recipe
+→ confirmation run
+~~~
+
+这样可以减少在两个 domain 上同时调参带来的实验自由度。
+
+#### 交付物
+
+- Beauty frozen SFT baseline；
+- Sports confirmation SFT baseline；
+- training logs；
+- checkpoint manifests。
+
+---
+
+### Phase 0E — Baseline Evaluation & Freeze
+
+对冻结 checkpoint 运行统一 evaluator。
+
+至少报告：
+
+- HR@1 / 5 / 10 / 20 / 50；
+- NDCG@5 / 10 / 20 / 50；
+- prediction coverage；
+- Top-1 concentration / popularity bias；
+- basic history-sensitivity diagnostic；
+- SID collision statistics。
+
+每个 result JSON 至少写入：
+
+- git SHA；
+- domain；
+- dataset manifest ID；
+- RQ-VAE / item-index identity；
+- tokenizer identity；
+- model checkpoint；
+- seed；
+- decoding strategy；
+- beam size；
+- max history length；
+- sample IDs / sample manifest。
+
+同一 checkpoint 至少重复 evaluation，确认结果在确定性设置下完全一致；若存在 sampling，则明确记录随机性。
+
+### Phase 0 最终交付物
+
+- 2 个冻结 dataset manifests；
+- 2 套 RQ-VAE / SID artifacts；
+- Beauty SFT baseline；
+- Sports confirmation baseline；
 - baseline evaluation JSON；
-- reproducibility README；
-- basic smoke tests。
+- reproducibility / artifact manifest；
+- smoke tests。
 
-### Go / No-Go
+### Phase 0 总体 Go / No-Go
 
-只有当同一 checkpoint 重复评测结果稳定，并且完整 pipeline 可复现时，才进入 Phase 1。
+只有当：
+
+1. Beauty 从 processed data → SID → SFT → evaluation 完整可复现；
+2. Sports 能使用冻结 recipe 重现同一 pipeline；
+3. 所有关键 artifact 都有明确 identity；
+4. 不再存在 train / inference / evaluation protocol 不一致；
+
+才正式进入 Phase 1。
 
 ---
 
@@ -768,13 +1003,17 @@ $$
 
 ### 5.1 多数据集
 
-至少：
+当前已经准备好的正式数据集：
 
-- Amazon Beauty；
-- Amazon Sports；
-- Amazon Toys。
+- Amazon Beauty 2018–2023；
+- Amazon Sports 2018–2023。
 
-如果时间和算力允许，再考虑一个非 Amazon 数据集。
+这两个 domain 是论文最低必做集合：
+
+- Beauty 用于 development / ablation；
+- Sports 用于跨 domain confirmation。
+
+第三个数据集只在主方法已经成立后再加入。优先候选可以是 Amazon Toys 或一个非 Amazon sequential recommendation dataset，但不要为了“凑三个数据集”延迟核心方法验证。
 
 ### 5.2 外部 Baselines
 
@@ -874,7 +1113,7 @@ mask z2
 | Method | CURE-U / CURE-UA |
 | Intervention | normal / zero / random / shuffle / matched |
 | Difficulty | easy / medium / hard |
-| Dataset | Beauty → Sports → Toys |
+| Dataset | Beauty（development）→ Sports（confirmation）→ optional third dataset |
 | External model | 先 1 个，最终视结果扩到 2–3 个 |
 
 这样不会一开始把项目做成一个庞大的 benchmark 工程。
@@ -977,9 +1216,14 @@ CURE 的目标不是制造依赖。
 
 完成 Phase 0。
 
-成功标志：
+当前状态：
 
-> Beauty SFT pipeline fully reproducible.
+- Beauty / Sports 2018–2023 data processing：**done**；
+- 当前进入 processed-data audit 与 baseline artifact 构建。
+
+最终成功标志：
+
+> Beauty pipeline fully reproducible, and Sports reproduces the frozen recipe without protocol changes.
 
 ### Milestone B — First Mechanism Result
 
@@ -1011,7 +1255,7 @@ CURE 的目标不是制造依赖。
 
 成功标志：
 
-> 至少 3 个数据集 + 代表性外部 baseline + 完整 ablation。
+> Beauty + Sports 跨 domain 结果成立；若时间允许再增加第三数据集，并完成代表性外部 baseline 与完整 ablation。
 
 ---
 
