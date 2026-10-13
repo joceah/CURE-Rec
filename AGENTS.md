@@ -21,13 +21,14 @@
 - 当前处于 **Phase 0 — Baseline Sanitation & Reproducibility**，其中 Phase 0A–0C 已完成，当前重点是 Phase 0D–0E 的 SFT baseline freeze 与统一 evaluation。
 - Amazon **Beauty 2018–2023** 与 **Sports 2018–2023** 已完成本地数据处理、数据审计 / freeze、text embedding、RQ-VAE 与 3-code Semantic ID artifacts。
 - leave-two-out test evaluation 按 `train + valid → test` 执行；Beauty 作为 development domain，Sports 作为冻结 recipe 后的 confirmation domain。
-- **CARE** 已作为第一个外部 SID-based reasoning baseline 适配到项目协议，代码位于 `baselines/care/`；当前应先完成 Beauty numerical sanity，再决定 intervention audit 的扩展。
-- CARE 属于 method-level external baseline，不与 SFT / Latent-CE / CURE 的 controlled ablation 混为一类。其 stage query state 是 SID prediction 的结构性必经表示，不能机械把 zero-query-state 解释为与 CURE Zero-Z 相同的 Necessity Gap。
+- 研究路线明确采用 **method-first**：优先提升 CURE 自身推荐性能，再用 CURE-specific intervention 证明 latent reasoning 对性能提升有实际贡献。
+- 不展开跨架构 latent-reasoning faithfulness audit；CARE 等外部方法主要作为后期标准推荐性能 baseline。
 ## 下一步计划（可实时更新）
 - 完成并冻结 Beauty Qwen SFT baseline，随后以冻结 recipe 跑 Sports confirmation baseline。
 - 完成统一 baseline evaluation 与 artifact identity 记录，闭环 Phase 0。
-- 对 CARE 先跑 Beauty train → valid → test numerical sanity，并确认 frozen sample IDs、SID collision reporting 与 checkpoint reload 行为。
-- Phase 1 实现 K=1 Latent-CE，并加入 normal / zero / random / shuffle intervention hooks。
-- Phase 2 以 CARE 作为第一外部 SID reasoning baseline；CARE 使用 architecture-aware audit（如 progressive-off、matched reasoning-state swap、history sensitivity），不要强行与 CURE 的 Zero-Z NG 等价。
-- 只有 CURE / CARE 主结果稳定后，再考虑 S²GR、IBA、SCoTER 等第二批外部方法。
+- Phase 1 实现 K=1 Latent-CE，首先验证 latent architecture 本身能否达到或超过 SFT。
+- Phase 2 实现 CURE-U / CURE-UA，重点看 HR / NDCG 相比 Latent-CE 是否稳定提升。
+- Phase 3 只针对 CURE 自身做 normal / zero / shuffle / matched intervention，用于证明 latent pathway 对增益有可验证贡献。
+- CARE 已保留在 `baselines/care/`，未来在 Phase 5 作为 SID-based reasoning 性能 baseline；当前不做 progressive-off、state-swap 等 CARE-specific faithfulness audit。
+- 只有 CURE 主结果稳定后，再考虑是否加入 S²GR、IBA、SCoTER 等额外性能 baseline。
 - 注意，为了防止该文档无效堆积过度膨胀，当完成某一阶段的开发任务时，请把开发记录存在![开发进度文档](docs/develop_log.md)里，开发进度文档除了我告知你审阅的情况下，正常情况下**禁止**阅读该文档，避免浪费大量token阅读过去开发记录
