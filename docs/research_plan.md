@@ -1,6 +1,6 @@
 # CURE-Rec Research Plan
 
-> 更新时间：2026-10-04  
+> 更新时间：2026-10-13  
 > Working title: **CURE-Rec: Causal Utilization-Regularized rEasoning for Generative Recommendation**  
 > 核心问题：生成式推荐模型能否学习不仅“与目标相关”，而且真正被最终推荐决策所利用的 latent reasoning？
 
@@ -25,30 +25,26 @@
 - 只有当现象和方法都成立后，再扩展外部 latent-reasoning baselines；
 - 不在 Phase 0–2 就大规模复现所有近期论文。
 
-### 当前项目状态（2026-10-04）
+### 当前项目状态（2026-10-13）
 
-当前处于 **Phase 0 — Baseline Sanitation & Reproducibility**，其中数据处理子阶段已经完成。
+当前仍处于 **Phase 0 — Baseline Sanitation & Reproducibility**，但基础数据与 SID artifact 已经从“准备阶段”推进到可冻结状态。
 
 已完成：
 
 - CURE-Rec 仓库从 MIR 迁移出干净的 generative recommendation baseline；
 - leave-two-out test history 已修正为 `train + valid → test`；
-- 本地 `data/processed/` 下已经完成 Amazon **Beauty** 与 **Sports** 两个 domain 的 **2018–2023** 数据处理；
-- 两个 domain 都将作为 CURE-Rec 的正式实验数据，而不是临时 debug 数据。
+- Amazon **Beauty** 与 **Sports** 两个 domain 的 **2018–2023** 数据处理已经完成；
+- Beauty / Sports processed data 已完成 audit、sample-ID freeze 与 dataset manifest；
+- Beauty / Sports text embedding、RQ-VAE 与 3-code Semantic ID artifact 已完成；
+- CARE 已以独立 external baseline 形式适配到当前冻结协议，代码位于 `baselines/care/`。
 
-尚未完成：
+当前重点：
 
-- 对 processed data 做统计审计与数据完整性检查；
-- 为两个 domain 固定 dataset manifest / artifact identity；
-- 生成 item text embeddings；
-- 训练并冻结各自的 RQ-VAE / Semantic ID；
-- 训练 Qwen SFT baseline；
-- 跑通可复现的 validation / test evaluation；
-- 冻结 Phase 0 baseline artifacts。
-
-因此项目当前的实际入口不是“重新做数据处理”，而是：
-
-> **从已处理好的 Beauty / Sports 2018–2023 数据出发，完成 baseline artifact 构建、验证与冻结。**
+- 完成并冻结 Beauty Qwen SFT baseline；
+- 用冻结 recipe 在 Sports 上做 confirmation baseline；
+- 完成统一 baseline evaluation；
+- 对 CARE 先做 Beauty numerical sanity，再决定何时加入 intervention audit；
+- 在 Phase 0 闭环后进入 Phase 1 的最小 K=1 latent pathway。
 
 实验推进采用两层结构：
 
@@ -435,7 +431,7 @@ $$
 
 建立一个可信、冻结、后续所有 CURE 实验都基于同一协议的 TIGER/Qwen baseline。
 
-Phase 0 不再视为一个单一任务，而拆成五个连续子阶段。当前 **0A 已完成，正在进入 0B**。
+Phase 0 不再视为一个单一任务，而拆成五个连续子阶段。当前 **0A–0C 已完成，0D–0E 待闭环**。
 
 ---
 
@@ -810,13 +806,83 @@ src/models/cure/
 
 1. SFT；
 2. Latent-CE；
-3. 如果工程成本可接受，再选 **1 个最兼容的公开 latent-reasoning baseline**。
+3. **CARE**：作为第一个外部 SID-based reasoning baseline，目前项目内已经完成 protocol adaptation；
+4. 只有 CARE 与 CURE 的核心现象跑通后，再考虑 S²GR / IBA / SCoTER 等第二批方法。
 
-目的不是立即建立 benchmark，而是确认 protocol 能区分不同 utilization behavior。
+CARE 的价值在于它与当前 pipeline 高度兼容：同样以 Semantic ID 为输出、使用 constrained SID decoding，并显式在每个 SID stage 插入 query-anchored reasoning。它比 ReaRec / LARES 这类 ID-based sequential recommender 更适合作为当前项目的外部 reasoning baseline。
+
+### CARE 的角色与干预边界
+
+CARE 不能机械套用 CURE 的全部 intervention 定义。
+
+CARE 的 stage query hidden state 本身就是当前 SID token 的直接预测表示：最后一个 query hidden state 经 `lm_head` 后产生该 stage logits。因此：
+
+> **直接将最终 query hidden state 置零，再计算 “CARE-NG” 没有太强研究意义。**
+
+这种干预几乎等价于直接清空 pre-logit representation，只能证明 architecture 按设计使用该状态，而不能证明 reasoning 本身具有额外信息价值。
+
+CARE 更适合做以下 architecture-aware audit：
+
+1. **Normal CARE**：标准 query-anchored reasoning + progressive history encoding；
+2. **Progressive-off**：关闭 progressive visibility，衡量 progressive history encoding 的增益；
+3. **Query/reasoning ablation**：作为 CARE 原方法内部 ablation 报告，但不要和 CURE 的 same-model Zero-Z Necessity Gap 直接等同；
+4. **Matched reasoning-state swap**：在同一 SID stage 用 matched donor 的 contextualized query state 替换当前用户状态，重点测 personalization / state specificity；
+5. **History-sensitivity test**：保持全局 query embeddings 不变，shuffle / replace history，检查 contextualized reasoning state 是否真的随用户历史变化。
+
+如果实现 matched reasoning-state swap，可以定义 CARE-specific personalization effect：
+
+$$
+PG^{CARE}_{state}@K
+=
+HR@K_{normal}
+-
+HR@K_{matched\ state\ swap}
+$$
+
+但该指标应明确写成 **state personalization / specificity**，而不是与 CURE 的 Necessity Gap 做完全同义比较。
+
+### CARE 当前实现状态
+
+项目内的实现位于：
+
+~~~text
+baselines/care/
+    model.py
+    data.py
+    train.py
+    evaluate.py
+    config.yaml
+    README.md
+~~~
+
+当前 adaptation：
+
+- 基于官方 CARE commit `9af734f2b48a9643c5246ac68c1a9f16770bc2a8`；
+- 保留 query-anchored reasoning；
+- 保留 stage-specific progressive history visibility；
+- 保留 query diversity regularization；
+- 使用项目统一的 exact SID-trie constrained decoding；
+- 使用 Beauty / Sports 2018–2023 frozen leave-two-out protocol；
+- 使用当前项目的 3-code SID，而官方示例主要使用 4-code SID；
+- 使用 Qwen2.5-1.5B 与项目 LoRA recipe，而不是把官方数值设置原样复制过来。
+
+因此论文中应表述为：
+
+> **CARE adapted to the CURE-Rec experimental protocol**
+
+而不是声称复现了 CARE 论文原表中的绝对数值。
+
+CARE 进入正式实验前至少需要：
+
+- Beauty train → valid → test smoke run；
+- 与 SFT 使用相同 frozen sample IDs；
+- 记录当前 project adaptation 与 upstream setting 的差异；
+- 确认 query diversity loss、progressive mask 与 checkpoint reload 行为和官方定义一致；
+- 最终实验同时报告 SID collision / ambiguous SID 情况。
 
 ### 期望发现
 
-例如：
+对于 CURE / Latent-CE，可以继续使用：
 
 ~~~text
 Model A
@@ -833,23 +899,45 @@ Normal > Matched Shuffle > Zero
 → latent 同时具有必要性和个性化信息
 ~~~
 
+CARE 则重点回答另一个互补问题：
+
+> 当 reasoning 被结构性地放在 SID token 的必经预测路径上时，这些 contextualized reasoning states 是否仍然包含当前用户特有的信息，而不是仅作为固定 query / stage bias？
+
+这使 CARE 成为一个很有价值的对照：
+
+~~~text
+CURE:
+optional latent pathway
+→ 研究模型是否主动利用 latent
+
+CARE:
+structurally enforced reasoning pathway
+→ 研究 reasoning state 是否真正 history-dependent / personalized
+~~~
+
 ### 交付物
 
 - intervention evaluator；
 - NG / SG / PG；
 - matched-counterfactual sampler；
-- utilization behavior taxonomy。
+- utilization behavior taxonomy；
+- CARE accuracy baseline；
+- CARE architecture-aware reasoning audit。
 
 ### Go / No-Go
 
-如果所有模型 normal / zero / shuffle 都高度一致：
+如果 Latent-CE normal / zero / shuffle 高度一致：
 
-- 说明这个问题很强，继续 Phase 3。
+- 说明 latent bypass 问题很强，继续 Phase 3。
 
-如果所有模型天然都有很强 utilization：
+如果 Latent-CE 天然已有很强 utilization：
 
 - 不再强调 “latent bypass”；
 - 转向 “personalized faithfulness / functional specificity”。
+
+如果 CARE 的 normal accuracy 有竞争力，但 contextualized reasoning state 对 matched swap / history perturbation 不敏感：
+
+- 这是非常有价值的诊断结果，说明“结构上经过 reasoning token”仍不自动等于 personalized reasoning。
 
 ---
 
@@ -1017,22 +1105,61 @@ $$
 
 ### 5.2 外部 Baselines
 
-不要追求数量。
+不要追求数量，也不要把“latent reasoning 相关”与“能直接纳入 SID-based generative recommendation protocol”混为一谈。
 
-建议按“范式代表性”选择 2–3 个：
+当前优先级：
 
-- 一个基础 generative recommender；
-- 一个 latent reasoning recommender；
-- 一个较新的 multi-step / adaptive latent reasoning 方法。
+1. **CARE — 第一优先级，已完成项目适配**  
+   SID-based generative recommendation；query-anchored reasoning；progressive history encoding；与 TIGER/SID pipeline 高度兼容。
+2. **S²GR — 第二优先级候选**  
+   SID generation 前插入 latent thinking state，并用 codebook semantics 做监督；概念兼容度高，但复现成本高于 CARE。
+3. **IBA / Where Reasoning Matters — 第二优先级候选**  
+   研究不同 SID position 的 reasoning budget；与 CURE 的“reasoning 是否真的被使用”形成互补问题。
+4. **SCoTER — 条件允许时加入**  
+   structured reasoning transfer，论文直接在 TIGER 类 generative recommendation 上验证，但 teacher / transfer pipeline 更重。
 
-优先选择：
+以下工作优先作为 related work，而不是当前实验 baseline：
 
-- 有公开代码；
-- 数据接口能适配；
-- latent state 可以被 intervention；
-- 不需要极高训练成本。
+- ReaRec；
+- LARES；
+- RecRec。
 
-### 5.3 两种论文规模
+原因是它们主要建立在 ID-based / text-based sequential recommendation，而不是当前 Semantic-ID autoregressive generation protocol 上。除非论文后续转成跨推荐范式的大规模 utilization audit，否则不值得为它们引入大量适配变量。
+
+LatentR³ / LaRec / HiLaR 处于中间位置：research question 很近，但输出范式与 TIGER SID generation 不完全一致。只有在主实验已经稳定后才考虑适配。
+
+### 5.3 Controlled Comparison vs Method-level Comparison
+
+需要区分两类实验。
+
+**Controlled CURE ablation**：
+
+~~~text
+SFT
+Latent-CE
+CURE-U
+CURE-UA
+~~~
+
+这些模型必须尽量共享：
+
+- backbone；
+- tokenizer / SID；
+- prompt；
+- tuning strategy；
+- sample IDs；
+- decoding；
+- evaluation protocol。
+
+这样才能把变化归因到 CURE。
+
+**External method comparison**：
+
+CARE 等论文方法应尽量保留其核心 architecture / objective，只适配到统一数据、SID artifact 与 evaluation protocol。
+
+因此 CARE 与 SFT 的差异不应该被解释成“纯 reasoning module 的 controlled gain”；它是 method-level comparison。
+
+### 5.4 两种论文规模
 
 #### Method-first paper
 
@@ -1050,19 +1177,19 @@ Evaluation protocol 是 supporting contribution。
 
 #### Evaluation-first paper
 
-如果我们发现大量 latent-reasoning models 都存在显著 utilization gap，但 CURE 方法提升有限：
+如果我们发现多个 latent-reasoning models 都存在显著 utilization / personalization gap，但 CURE 方法提升有限：
 
 主线可以变成：
 
 > **Current latent-reasoning recommenders may not use what they reason.**
 
-这时需要更多 baselines，工作量更大，但 research contribution 更偏 benchmark / methodology。
+这时再扩大外部 baseline 数量，工作量更大，但 research contribution 更偏 benchmark / methodology。
 
 ### 推荐优先级
 
 **优先争取 Method-first。**
 
-因为这样不需要一开始就复现大量外部模型，也更适合当前时间和工程条件。
+CARE 当前已经足以作为第一个外部 SID reasoning reference；没有必要在 CURE 核心结果出现以前继续扩张 baseline zoo。
 
 ---
 
@@ -1111,10 +1238,12 @@ mask z2
 | Baseline | SFT |
 | Architecture | Latent-CE |
 | Method | CURE-U / CURE-UA |
+| External SID reasoning baseline | CARE（已实现，method-level comparison） |
 | Intervention | normal / zero / random / shuffle / matched |
+| CARE-specific audit | progressive-off / matched state swap / history sensitivity |
 | Difficulty | easy / medium / hard |
 | Dataset | Beauty（development）→ Sports（confirmation）→ optional third dataset |
-| External model | 先 1 个，最终视结果扩到 2–3 个 |
+| Additional external model | 只有主结果稳定后再决定是否加入 S²GR / IBA / SCoTER |
 
 这样不会一开始把项目做成一个庞大的 benchmark 工程。
 
@@ -1141,6 +1270,8 @@ mask z2
 - shuffle 它会怎样？
 - reload 后还会怎样？
 - generation 时它真的执行了吗？
+
+对于 CARE 这类结构性 reasoning baseline，还必须先判断 intervention 是否与 CURE 具有相同语义；不能为了统一表格而强行把 architecture ablation 叫作 Necessity Gap。
 
 ### 9.3 新实验必须记录 artifact identity
 
@@ -1194,9 +1325,9 @@ CURE 的目标不是制造依赖。
 
 ### 风险 D：外部 baseline 工作量过大
 
-论文早期只要求一个兼容 baseline。
+CARE 已作为第一批高度兼容 baseline。论文早期不要求继续扩张 baseline 数量。
 
-只有 Method-first 主结果成立后才扩大 baseline 数量。
+只有 Method-first 主结果成立后才扩大到 S²GR / IBA / SCoTER 等方法。
 
 ### 风险 E：“causal” 被 reviewer 质疑
 
@@ -1207,6 +1338,18 @@ CURE 的目标不是制造依赖。
 - formal causal effect estimation。
 
 除非后续建立完整 SCM 与 identification assumptions，否则不要声称估计了严格的 causal effect。
+
+### 风险 F：不同 architecture 的 intervention 不可直接比较
+
+CURE 是 optional latent path；CARE 的 query state 是 SID prediction 的结构性必经节点。
+
+因此：
+
+- CURE 的 Zero-Z 可以解释为 same-model latent necessity；
+- CARE 的 zero final query hidden 更接近直接破坏输出表示；
+- 两者不应直接放在同一 NG 数值列里宣称谁“更 faithful”。
+
+应优先比较共同的 recommendation utility，并对每种 architecture 使用语义合理的 intervention。
 
 ---
 
@@ -1219,7 +1362,10 @@ CURE 的目标不是制造依赖。
 当前状态：
 
 - Beauty / Sports 2018–2023 data processing：**done**；
-- 当前进入 processed-data audit 与 baseline artifact 构建。
+- processed-data audit / freeze：**done**；
+- text embedding / RQ-VAE / SID artifact：**done**；
+- CARE external baseline implementation：**done, pending numerical validation**；
+- SFT baseline freeze / unified evaluation：**current priority**。
 
 最终成功标志：
 
@@ -1231,7 +1377,7 @@ CURE 的目标不是制造依赖。
 
 成功标志：
 
-> 能明确画出 Normal / Zero / Shuffle / Matched 的差异。
+> 能明确画出 CURE / Latent-CE 的 Normal / Zero / Shuffle / Matched 差异，并得到第一组 CARE architecture-aware audit 结果。
 
 ### Milestone C — CURE Works
 
@@ -1255,7 +1401,7 @@ CURE 的目标不是制造依赖。
 
 成功标志：
 
-> Beauty + Sports 跨 domain 结果成立；若时间允许再增加第三数据集，并完成代表性外部 baseline 与完整 ablation。
+> Beauty + Sports 跨 domain 结果成立，CARE 作为兼容 SID reasoning baseline 完成比较；若结果需要再增加 S²GR / IBA / SCoTER 或第三数据集。
 
 ---
 
@@ -1274,6 +1420,10 @@ CURE 的目标不是制造依赖。
 ### Q3. Can we explicitly learn useful latent dependence?
 
 用 CURE framework 回答。
+
+CARE 提供一个有价值的结构性对照：
+
+> 即使一个方法把 reasoning query 放进 SID 生成的必经路径，也仍然需要区分“结构上必须经过该 state”和“该 state 是否包含用户特异、可解释为 reasoning 的信息”。
 
 于是论文不再只是：
 
@@ -1300,10 +1450,10 @@ CURE 的目标不是制造依赖。
    提出 **CURE-Rec**，通过 personalized counterfactual utilization regularization 和 baseline anchoring，使 latent reasoning 成为真正有用的 decision pathway。
 
 3. **Evaluation**  
-   提出 intervention-based protocol，区分 latent necessity、generic sensitivity 与 personalized utilization。
+   提出 intervention-based protocol，区分 latent necessity、generic sensitivity 与 personalized utilization，并强调 intervention 应与 architecture 的信息路径语义一致。
 
 4. **Analysis**  
-   研究 utilization 与 sample difficulty、recommendation accuracy、functional specialization 之间的关系。
+   研究 utilization 与 sample difficulty、recommendation accuracy、functional specialization 之间的关系，并以 CARE 作为 SID-based structurally enforced reasoning 的代表性对照。
 
 ---
 
@@ -1344,18 +1494,48 @@ CURE 的目标不是制造依赖。
 
 正式写论文前需要再次核对最终发表版本和最新工作。
 
-- ReaRec — inference-time / latent reasoning for recommendation
-- LARES — recurrent latent reasoning
-- LatentR³ — latent reasoning + reinforcement learning
-- SCoTER — structured reasoning transfer
-- S²GR — semantic supervision for generative reasoning
-- LaRec — latent reasoning + multi-path reasoning
-- RecRec — latent interests + recursive reasoning
-- IBA / Where Reasoning Matters — reasoning budget allocation
-- HiLaR — hierarchical latent reasoning / marginal contribution
-- ReSID / UniGRec / PIT / AsymRec — Semantic ID / tokenizer research
-- GenPAS — generative recommendation training sample construction
-- General latent-reasoning faithfulness work — intervention / activation patching
+## 17.1 SID-based / TIGER-compatible reasoning
+
+- **CARE — Bringing Reasoning to Generative Recommendation Through the Lens of Cascaded Ranking**  
+  Query-Anchored Reasoning + Progressive History Encoding；直接作用于 Semantic-ID autoregressive generation，是当前 CURE-Rec 最兼容的外部 reasoning baseline。  
+  Paper: https://arxiv.org/abs/2602.03692  
+  Code: https://github.com/Linxyhaha/CARE
+
+- **S²GR — Stepwise Semantic-Guided Reasoning in Latent Space for Generative Recommendation**  
+  在每个 SID generation step 前插入 latent thinking state，并使用 codebook semantics 进行监督。
+
+- **IBA / Where Reasoning Matters**  
+  研究 SID position-wise information gain，并把不同 reasoning budget 分配给不同 SID stage。
+
+- **SCoTER**  
+  Structured reasoning transfer；与 TIGER 类 generative recommendation 兼容，但 teacher / transfer pipeline 更重。
+
+## 17.2 Latent reasoning：研究问题接近，但生成范式不同
+
+- **LatentR³** — latent reasoning + reinforcement learning；
+- **LaRec** — latent reasoning + multi-path reasoning；
+- **HiLaR** — hierarchical latent reasoning / marginal contribution。
+
+这些工作与 CURE 的 research question 很近，但不是当前第一优先级的 SID baseline。
+
+## 17.3 Sequential-recommendation latent reasoning
+
+- **ReaRec** — inference-time / latent reasoning for ID/text-based sequential recommendation；
+- **LARES** — recurrent latent reasoning；
+- **RecRec** — latent interests + recursive reasoning。
+
+它们适合作为 related work；当前不为了 baseline 数量强行适配到 TIGER/SID pipeline。
+
+## 17.4 Semantic ID / tokenizer 与实验协议
+
+- **ReSID / UniGRec / PIT / AsymRec** — Semantic ID / tokenizer research；
+- **GenPAS** — generative recommendation training sample construction。
+
+## 17.5 General latent-reasoning faithfulness
+
+- General latent-reasoning faithfulness work — counterfactual intervention / activation patching / hidden-state faithfulness。
+
+这类工作是 CURE intervention design 的方法学参考，但不是 recommendation baseline。
 
 ---
 
