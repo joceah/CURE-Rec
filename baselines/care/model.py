@@ -104,8 +104,10 @@ class CARE(Qwen2ForCausalLM):
         if self.query_div_scale and self.query_embeddings.num_embeddings > 1:
             queries = F.normalize(self.query_embeddings.weight.float(), dim=-1)
             similarities = queries @ queries.T
-            off_diagonal = ~torch.eye(len(queries), device=queries.device, dtype=torch.bool)
-            loss = loss + self.query_div_scale * similarities[off_diagonal].mean()
+            diagonal = torch.eye(len(queries), device=queries.device, dtype=torch.bool)
+            # Match upstream CARE: zero the diagonal, then average the full matrix.
+            similarities = similarities.masked_fill(diagonal, 0.0)
+            loss = loss + self.query_div_scale * similarities.mean()
         return CausalLMOutputWithPast(loss=loss, logits=logits)
 
     @torch.no_grad()
