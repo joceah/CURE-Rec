@@ -22,12 +22,12 @@ def test_evaluator_smoke():
     print("=" * 80)
 
     metrics = evaluate(
-        model_path="data/checkpoints/sft/merged",
-        tokenizer_path="data/checkpoints/sft/tokenizer",
-        item_index_path="data/processed/beauty_2021_2023/item.index.json",
-        user_sequences_path="data/processed/beauty_2021_2023/user_sequences.json",
-        test_csv_path="data/processed/beauty_2021_2023/test.csv",
-        valid_csv_path="data/processed/beauty_2021_2023/valid.csv",
+        model_path="data/checkpoints/beauty/sft/merged",
+        tokenizer_path="data/checkpoints/beauty/sft/tokenizer",
+        item_index_path="data/artifacts/beauty_2018_2023/item.index.json",
+        user_sequences_path="data/processed/beauty_2018_2023/user_sequences.json",
+        test_csv_path="data/processed/beauty_2018_2023/test.csv",
+        valid_csv_path="data/processed/beauty_2018_2023/valid.csv",
         max_history_len=20,
         num_beams=10,
         batch_size=4,

@@ -7,9 +7,9 @@
 
 用法:
   python scripts/analysis/compare_gt_rank.py \
-    --baseline_ckpt data/checkpoints/sft/merged \
+    --baseline_ckpt data/checkpoints/beauty/sft/merged \
     --cot_ckpt data/checkpoints/cot_align_1000/model \
-    --tokenizer_baseline data/checkpoints/sft/tokenizer \
+    --tokenizer_baseline data/checkpoints/beauty/sft/tokenizer \
     --tokenizer_cot data/checkpoints/cot_align_1000/tokenizer \
     --dataset beauty \
     --sample_size 1000 \
@@ -152,14 +152,15 @@ def main():
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
-    data_dir = f"data/processed/{args.dataset}_2021_2023"
+    data_dir = f"data/processed/{args.dataset}_2018_2023"
+    artifact_dir = f"data/artifacts/{args.dataset}_2018_2023"
     device = torch.device("cuda:0")
 
     # 使用 baseline tokenizer 加载item_index
     tok_baseline = AutoTokenizer.from_pretrained(args.tokenizer_baseline, trust_remote_code=True)
     if tok_baseline.pad_token_id is None:
         tok_baseline.pad_token_id = tok_baseline.eos_token_id
-    with open(f"{data_dir}/item.index.json") as f:
+    with open(f"{artifact_dir}/item.index.json") as f:
         item_index = json.load(f)
     item_sid_ids = {int(k): tok_baseline.convert_tokens_to_ids(v) for k, v in item_index.items()}
     prefix_tree = SidPrefixTree(item_sid_ids)

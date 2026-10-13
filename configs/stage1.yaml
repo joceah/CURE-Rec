@@ -1,0 +1,21 @@
+# 阶段 1：Amazon 数据处理
+domain: beauty
+
+domains:
+  beauty:
+    review_path: data/raw/Beauty.jsonl
+    meta_path: data/raw/meta_Beauty.jsonl
+    output_dir: data/processed/beauty_2018_2023
+  sports:
+    review_path: data/raw/Sports.jsonl
+    meta_path: data/raw/meta_Sports.jsonl
+    output_dir: data/processed/sports_2018_2023
+
+k: 5
+start_date: "2018-01-01"
+end_date: "2023-12-31"
+
+logging:
+  output_path: logs/stage1_${domain}.log
+  level: INFO
+  mode: w

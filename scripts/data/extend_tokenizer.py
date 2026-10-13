@@ -3,7 +3,7 @@
 用法：
     python scripts/data/extend_tokenizer.py \\
         --base_tokenizer Qwen/Qwen2.5-0.5B-Instruct \\
-        --item_index_path data/processed/beauty_2021_2023/item.index.json \\
+        --item_index_path data/artifacts/beauty_2018_2023/item.index.json \\
         --output_dir data/tokenizers/sft_v2_codebook512
 """
 import argparse
@@ -18,7 +18,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--base_tokenizer", default="Qwen/Qwen2.5-0.5B-Instruct")
     parser.add_argument("--item_index_path",
-                        default="data/processed/beauty_2021_2023/item.index.json")
+                        default="data/artifacts/beauty_2018_2023/item.index.json")
     parser.add_argument("--output_dir",
                         default="data/tokenizers/sft_v2_codebook512")
     args = parser.parse_args()
@@ -115,11 +115,11 @@ def main():
     print("✅ Tokenizer 扩展完成！")
     print("=" * 70)
     print(f"\n下一步：用新 tokenizer 重训 SFT")
-    print(f"  1. 修改 configs/model/llm/default.yaml:")
-    print(f"     base_model: Qwen/Qwen2.5-0.5B-Instruct")
-    print(f"     tokenizer_path: {args.output_dir}")
+    print(f"  1. 修改 configs/sft.yaml:")
+    print(f"     model.llm.base_model: Qwen/Qwen2.5-0.5B-Instruct")
+    print(f"     model.llm.tokenizer_path: {args.output_dir}")
     print(f"  2. 运行 SFT 训练:")
-    print(f"     accelerate launch --config_file configs/deepspeed/zero2_opt.yaml \\")
+    print(f"     accelerate launch --multi_gpu --num_processes 2 --mixed_precision bf16 \\")
     print(f"       scripts/train/run_sft.py")
 
 

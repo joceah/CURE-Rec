@@ -1,0 +1,299 @@
+{
+  "dataset": "sports_2018_2023",
+  "domain": "sports",
+  "processed_directory": "data/processed/sports_2018_2023",
+  "checks": {
+    "item_id_mapping_bijective_and_dense": {
+      "passed": true,
+      "detail": {
+        "mapped_items": 81571
+      }
+    },
+    "user_id_mapping_bijective_and_dense": {
+      "passed": true,
+      "detail": {
+        "mapped_users": 169680
+      }
+    },
+    "one_valid_and_test_target_per_user": {
+      "passed": true,
+      "detail": {
+        "valid_rows": 169680,
+        "test_rows": 169680
+      }
+    },
+    "sequence_users_match_user_mapping": {
+      "passed": true,
+      "detail": {
+        "mapped_users": 169680,
+        "sequence_users": 169680,
+        "missing_sequence_users": 0,
+        "extra_sequence_users": 0
+      }
+    },
+    "valid_and_test_users_match_user_mapping": {
+      "passed": true,
+      "detail": {
+        "valid_users": 169680,
+        "test_users": 169680,
+        "mapped_users": 169680
+      }
+    },
+    "metadata_ids_match_item_mapping": {
+      "passed": true,
+      "detail": {
+        "mapped_items": 81571,
+        "metadata_items": 81571,
+        "missing_metadata": 0,
+        "extra_metadata": 0
+      }
+    },
+    "heldout_targets_covered_by_item_map_and_metadata": {
+      "passed": true,
+      "detail": {
+        "valid_targets": 169680,
+        "test_targets": 169680,
+        "bad_target_rows": 0,
+        "examples": []
+      }
+    },
+    "heldout_users_covered_by_user_map": {
+      "passed": true,
+      "detail": {
+        "bad_user_rows": 0,
+        "examples": []
+      }
+    },
+    "all_sequences_and_targets_use_mapped_items": {
+      "passed": true,
+      "detail": {
+        "unmapped_item_ids": 0
+      }
+    },
+    "k_core_minimum_degree_at_least_five": {
+      "passed": true,
+      "detail": {
+        "min_user_interactions": 5,
+        "min_item_interactions": 5
+      }
+    },
+    "raw_timestamp_order_reproduces_saved_leave_two_out_split": {
+      "passed": true,
+      "detail": {
+        "mapped_raw_users": 169680,
+        "mapped_users": 169680,
+        "mapped_raw_interactions": 1420695,
+        "stored_interactions": 1420695,
+        "exact_train_histories": 169680,
+        "exact_valid_targets": 169680,
+        "exact_test_targets": 169680,
+        "same_timestamp_users": 6642,
+        "same_timestamp_adjacent_pairs": 34093,
+        "valid_test_same_timestamp_users": 6639,
+        "mismatch_examples": []
+      }
+    }
+  },
+  "failed_checks": [],
+  "metrics": {
+    "counts": {
+      "users": 169680,
+      "items": 81571,
+      "train_interactions": 1081335,
+      "valid_samples": 169680,
+      "test_samples": 169680,
+      "total_interactions": 1420695,
+      "unique_valid_target_items": 55275,
+      "unique_test_target_items": 52873,
+      "unique_heldout_target_items": 67899
+    },
+    "train_history_length": {
+      "count": 169680,
+      "min": 3,
+      "p50": 4,
+      "p90": 11,
+      "p95": 16,
+      "p99": 35,
+      "max": 388,
+      "mean": 6.3728
+    },
+    "heldout_target_coverage": {
+      "valid_item_map_rate": 1.0,
+      "test_item_map_rate": 1.0,
+      "valid_metadata_rate": 1.0,
+      "test_metadata_rate": 1.0
+    },
+    "metadata_missingness": {
+      "item_count": 81571,
+      "fields": {
+        "title": {
+          "missing_key_count": 0,
+          "empty_or_whitespace_count": 3,
+          "empty_or_whitespace_rate": 3.7e-05
+        },
+        "description": {
+          "missing_key_count": 0,
+          "empty_or_whitespace_count": 44421,
+          "empty_or_whitespace_rate": 0.544569
+        },
+        "features": {
+          "missing_key_count": 0,
+          "empty_or_whitespace_count": 3748,
+          "empty_or_whitespace_rate": 0.045948
+        },
+        "categories": {
+          "missing_key_count": 0,
+          "empty_or_whitespace_count": 1473,
+          "empty_or_whitespace_rate": 0.018058
+        },
+        "store": {
+          "missing_key_count": 0,
+          "empty_or_whitespace_count": 136,
+          "empty_or_whitespace_rate": 0.001667
+        },
+        "details": {
+          "missing_key_count": 0,
+          "empty_or_whitespace_count": 507,
+          "empty_or_whitespace_rate": 0.006215
+        }
+      },
+      "items_empty_across_stage2_text_fields": 0,
+      "stage2_text_fields": [
+        "title",
+        "features",
+        "categories"
+      ]
+    },
+    "degree_audit": {
+      "user_interactions_including_two_targets": {
+        "count": 169680,
+        "min": 5,
+        "p50": 6,
+        "p90": 13,
+        "p95": 18,
+        "p99": 37,
+        "max": 390,
+        "mean": 8.3728
+      },
+      "item_interaction_frequency": {
+        "count": 81571,
+        "min": 5,
+        "p50": 10,
+        "p90": 33,
+        "p95": 52,
+        "p99": 132,
+        "max": 1185,
+        "mean": 17.4167
+      }
+    },
+    "temporal_order": {
+      "mapped_raw_users": 169680,
+      "mapped_users": 169680,
+      "mapped_raw_interactions": 1420695,
+      "stored_interactions": 1420695,
+      "exact_train_histories": 169680,
+      "exact_valid_targets": 169680,
+      "exact_test_targets": 169680,
+      "same_timestamp_users": 6642,
+      "same_timestamp_adjacent_pairs": 34093,
+      "valid_test_same_timestamp_users": 6639,
+      "mismatch_examples": []
+    }
+  },
+  "preprocessing_recipe": {
+    "review_date_window_utc_inclusive": [
+      "2018-01-01",
+      "2023-12-31"
+    ],
+    "k_core_threshold": 5,
+    "split": "per-user timestamp ascending; final interaction=test, previous=valid",
+    "timestamp_tie_break": "stable source JSONL order, matching Python sorted()",
+    "source_timezone": "UTC"
+  },
+  "source_artifacts": {
+    "reviews": {
+      "path": "data/raw/Sports.jsonl",
+      "size_bytes": 9256856041,
+      "sha256": "47eaab08457fd7d270613f193506c479492b696a808ae5639a949b27026a4559",
+      "jsonl_records": 19595170,
+      "malformed_json_records_skipped_like_preprocessor": 0,
+      "invalid_timestamp_records": 0,
+      "records_in_date_window": 12338372,
+      "records_with_both_final_mapped_ids": 1420695
+    },
+    "metadata": {
+      "path": "data/raw/meta_Sports.jsonl",
+      "size_bytes": 4132263769,
+      "sha256": "321aba659220c48a8dcf2a4034f1eb965fae031941d81c9b7e47811caae85db9"
+    }
+  },
+  "processed_artifacts": {
+    "item2id.json": {
+      "path": "data/processed/sports_2018_2023/item2id.json",
+      "size_bytes": 1701881,
+      "sha256": "2fb86e2994d407416b4ed5060b2690061d9a451f41d966d8f5d2c5a204055b36"
+    },
+    "user2id.json": {
+      "path": "data/processed/sports_2018_2023/user2id.json",
+      "size_bytes": 6676204,
+      "sha256": "cf7192f5b2d3cf2509ac2c77112484ae029615ccdccf7db06e2ee47dc2264d89"
+    },
+    "item_meta.json": {
+      "path": "data/processed/sports_2018_2023/item_meta.json",
+      "size_bytes": 162903133,
+      "sha256": "d437412f5a44e2d28fdb218cebf5ed9db4906d87d59fa84f726336bede38a9fe"
+    },
+    "user_sequences.json": {
+      "path": "data/processed/sports_2018_2023/user_sequences.json",
+      "size_bytes": 9366974,
+      "sha256": "cb43529ea13df823424f4f3898cb7ffc2ab272f398d61fdd707b84aba64ad401"
+    },
+    "valid.csv": {
+      "path": "data/processed/sports_2018_2023/valid.csv",
+      "size_bytes": 2076972,
+      "sha256": "6a4f27dfb19ac135867c31bb9247865d6ca712c0466aecca386834209f723227"
+    },
+    "test.csv": {
+      "path": "data/processed/sports_2018_2023/test.csv",
+      "size_bytes": 2079302,
+      "sha256": "0e9612ed9ac3dc2ee81c25e2223d505e11649b543e6db4ae296711352a43b069"
+    }
+  },
+  "preprocessing_code": {
+    "src/data/amazon_process.py": {
+      "path": "src/data/amazon_process.py",
+      "size_bytes": 9907,
+      "sha256": "b4ebb9019506fc1c79360423745b5de307d72630884b0cd8574771c30a6cf767"
+    },
+    "scripts/data/run_process.py": {
+      "path": "scripts/data/run_process.py",
+      "size_bytes": 1865,
+      "sha256": "e47a329ad5a5c225ec98bf27b1cc5f0edb271ae65c58d6e7acc6db626aae691e"
+    }
+  },
+  "git_head": "a73a0c3aa72c85c143a0121f7a5c08a58e17869e",
+  "fixed_sample_ids": {
+    "valid": {
+      "path": "data/manifests/sports_2018_2023/valid_sample_ids.csv",
+      "size_bytes": 9133245,
+      "sha256": "a0a2ccc244692e5f00a5491cc534f89838ef3fe8202a52844453dacc1fdbcd5b",
+      "rows": 169680,
+      "sample_id_format": "sports_2018_2023:valid:<user_id>:<target_item_id>"
+    },
+    "test": {
+      "path": "data/manifests/sports_2018_2023/test_sample_ids.csv",
+      "size_bytes": 8968225,
+      "sha256": "e3ca5b7317c039d4c33672369d60dad3bf7d37fea7283421b7f8d6818ac506ed",
+      "rows": 169680,
+      "sample_id_format": "sports_2018_2023:test:<user_id>:<target_item_id>"
+    }
+  },
+  "freeze_status": "frozen",
+  "audit_timestamp_utc": "2026-10-04T13:53:53.021138+00:00",
+  "python_version": "3.13.12",
+  "audit_script": {
+    "path": "scripts/data/audit_freeze_processed.py",
+    "size_bytes": 21910,
+    "sha256": "fe37bfe457d7097ad27f6fb836ed7a6220c5c62de09b14edf4477364fd18dd33"
+  }
+}

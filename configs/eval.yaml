@@ -1,0 +1,34 @@
+# 阶段 4：生成式推荐评估
+eval:
+  domain: beauty
+  processed_dir: data/processed/${eval.domain}_2018_2023
+  artifact_dir: data/artifacts/${eval.domain}_2018_2023
+  model_path: data/checkpoints/${eval.domain}/sft/merged
+  tokenizer_path: data/checkpoints/${eval.domain}/sft/tokenizer
+  item_index_path: ${eval.artifact_dir}/item.index.json
+  user_sequences_path: ${eval.processed_dir}/user_sequences.json
+  test_csv_path: ${eval.processed_dir}/test.csv
+  valid_csv_path: ${eval.processed_dir}/valid.csv
+
+  max_history_len: 20
+  num_beams: 50
+  batch_size: 8
+  num_sid_layers: 3
+  sample_size: 5000
+  random_seed: 42
+  k_values: [1, 3, 5, 10, 20, 50]
+
+  output_dir: data/eval_results/${eval.domain}
+  output_name: sft_5k
+
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+  job:
+    chdir: false
+
+logging:
+  output_path: logs/eval_${eval.domain}.log
+  level: INFO
+  mode: w

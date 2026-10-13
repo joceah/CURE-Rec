@@ -1,0 +1,51 @@
+data:
+  domain: beauty
+  processed_dir: data/processed/${data.domain}_2018_2023
+  artifact_dir: data/artifacts/${data.domain}_2018_2023
+  manifest_dir: data/manifests/${data.domain}_2018_2023
+  user_sequences_path: ${data.processed_dir}/user_sequences.json
+  valid_path: ${data.processed_dir}/valid.csv
+  test_path: ${data.processed_dir}/test.csv
+  item_index_path: ${data.artifact_dir}/item.index.json
+  valid_ids_path: ${data.manifest_dir}/valid_sample_ids.csv
+  test_ids_path: ${data.manifest_dir}/test_sample_ids.csv
+
+model:
+  base_model: Qwen/Qwen2.5-1.5B
+  local_files_only: true
+  sid_layers: 3
+  codebook_size: 512
+  query_list: [1, 1, 1]
+  progressive_list: [true, true, true]
+  query_div_scale: 0.3
+  lora:
+    r: 16
+    alpha: 32
+    dropout: 0.05
+    target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+
+train:
+  epochs: 3
+  per_device_batch_size: 8
+  gradient_accumulation_steps: 16
+  learning_rate: 5e-5
+  weight_decay: 0.01
+  max_history_len: 20
+  valid_sample_size: 5000
+  seed: 42
+  output_dir: data/checkpoints/${data.domain}/care
+
+eval:
+  split: test
+  checkpoint_dir: ${train.output_dir}
+  output_path: data/eval_results/${data.domain}/care_${eval.split}.json
+  sample_size: 5000
+  num_beams: 50
+  k_values: [1, 3, 5, 10, 20, 50]
+
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+  job:
+    chdir: false

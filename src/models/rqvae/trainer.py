@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, TensorDataset
 from torch.optim import AdamW
 
@@ -61,13 +61,24 @@ def train_rqvae(cfg: DictConfig) -> tuple[RQVAE, torch.Tensor, torch.Tensor]:
         optimizer, start_factor=0.01, end_factor=1.0, total_iters=warmup_steps
     )
 
-    use_wandb = False
-    try:
-        import wandb
-        wandb.init(project="genrec", name="rqvae", config=dict(mcfg) | dict(tcfg))
-        use_wandb = True
-    except Exception:
-        pass
+    wandb_cfg = tcfg.get("wandb", {})
+    use_wandb = bool(wandb_cfg.get("enabled", True))
+    if use_wandb:
+        try:
+            import wandb
+
+            wandb.init(
+                project=wandb_cfg.get("project", "genrec"),
+                name=wandb_cfg.get("name", "rqvae"),
+                entity=wandb_cfg.get("entity"),
+                group=wandb_cfg.get("group"),
+                tags=OmegaConf.to_container(wandb_cfg.get("tags", []), resolve=True),
+                mode=wandb_cfg.get("mode", "online"),
+                config=OmegaConf.to_container(cfg, resolve=True),
+            )
+        except Exception as exc:
+            logger.warning("wandb 初始化失败，将继续训练但不记录 wandb: %s", exc)
+            use_wandb = False
 
     best_loss = float("inf")
     best_collision = float("inf")
@@ -124,6 +135,9 @@ def train_rqvae(cfg: DictConfig) -> tuple[RQVAE, torch.Tensor, torch.Tensor]:
                     break
 
     logger.info(f"训练完成，最佳碰撞率={best_collision:.4%}，checkpoint: {best_ckpt}")
+    if use_wandb:
+        import wandb
+        wandb.finish()
 
     ckpt = torch.load(best_ckpt, map_location=device)
     model.load_state_dict(ckpt["model"])

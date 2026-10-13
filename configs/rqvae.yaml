@@ -1,0 +1,63 @@
+# 阶段 2：训练 RQ-VAE 并生成商品 Semantic IDs
+data:
+  domain: sports
+  processed_dir: data/processed/${data.domain}_2018_2023
+  artifact_dir: data/artifacts/${data.domain}_2018_2023
+
+model:
+  text2emb:
+    output_path: ${data.artifact_dir}/item_embeddings.npy
+  rqvae:
+    input_dim: 1536
+    encoder_layers:
+      - 2048
+      - 1024
+      - 512
+      - 256
+      - 128
+      - 64
+    latent_dim: 32
+    num_layers: 3
+    codebook_size: 512
+    commitment_loss_weight: 0.25
+    quant_loss_weight: 1.0
+    use_sinkhorn: false
+    sk_epsilon: 0.05
+    sk_iters: 3
+    norm_type: layer
+    loss_type: mse
+
+train:
+  epochs: 5000
+  batch_size: 2048
+  learning_rate: 1e-3
+  weight_decay: 0.0
+  optimizer: AdamW
+  early_stopping_patience: 100
+  output_dir: ${data.artifact_dir}
+  checkpoint_path: ${train.output_dir}/rqvae_best.pt
+  index_output_path: ${train.output_dir}/item.index.json
+  seed: 2024
+  wandb:
+    enabled: true
+    project: genrec
+    entity: null
+    name: rqvae_${data.domain}_v1
+    group: stage2-rqvae
+    tags:
+      - stage2
+      - rqvae
+      - "${data.domain}"
+    mode: online
+
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+  job:
+    chdir: false
+
+logging:
+  output_path: logs/rqvae_${data.domain}.log
+  level: INFO
+  mode: w

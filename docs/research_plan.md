@@ -478,7 +478,7 @@ target  = test
 
 ---
 
-### Phase 0B — Processed Data Audit & Freeze ← 当前任务
+### Phase 0B — Processed Data Audit & Freeze ✅ 已完成
 
 在继续训练 RQ-VAE 之前，先证明输入数据本身可信。
 
@@ -547,7 +547,7 @@ manifest 可以提交 Git，但原始 / processed 大文件继续留在本地。
 
 ---
 
-### Phase 0C — Text Embedding & Semantic ID Artifacts
+### Phase 0C — Text Embedding & Semantic ID Artifacts ✅ 已完成
 
 对每个 domain 独立生成：
 

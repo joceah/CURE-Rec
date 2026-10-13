@@ -1,0 +1,32 @@
+# 阶段 2：商品文本编码为向量
+data:
+  domain: sports
+  processed_dir: data/processed/${data.domain}_2018_2023
+  artifact_dir: data/artifacts/${data.domain}_2018_2023
+  item_meta_path: ${data.processed_dir}/item_meta.json
+  text_fields:
+    - title
+    - features
+    - categories
+  field_separator: " "
+
+model:
+  text2emb:
+    model_name: Qwen/Qwen2.5-1.5B
+    embedding_dim: 1536
+    batch_size: 64
+    max_length: 256
+    output_dir: ${data.artifact_dir}
+    output_path: ${model.text2emb.output_dir}/item_embeddings.npy
+
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+  job:
+    chdir: false
+
+logging:
+  output_path: logs/text2emb_${data.domain}.log
+  level: INFO
+  mode: w

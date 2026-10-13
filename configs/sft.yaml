@@ -1,0 +1,83 @@
+# 阶段 3：使用 Qwen + LoRA 训练生成式推荐模型
+data:
+  domain: beauty
+  processed_dir: data/processed/${data.domain}_2018_2023
+  artifact_dir: data/artifacts/${data.domain}_2018_2023
+  user_sequences_path: ${data.processed_dir}/user_sequences.json
+  train_path: ${data.processed_dir}/train.csv
+  valid_path: ${data.processed_dir}/valid.csv
+  test_path: ${data.processed_dir}/test.csv
+  item_index_path: ${data.artifact_dir}/item.index.json
+
+model:
+  llm:
+    base_model: Qwen/Qwen2.5-1.5B
+    # 当前机器已有该模型缓存；设为 true 时只读本地缓存，不访问 Hugging Face Hub。
+    local_files_only: true
+    sft_model_path: null
+    tokenizer_path: null
+    rqvae:
+      num_layers: 3
+      codebook_size: 512
+    lora:
+      r: 16
+      alpha: 32
+      dropout: 0.05
+      target_modules:
+        - q_proj
+        - k_proj
+        - v_proj
+        - o_proj
+        - gate_proj
+        - up_proj
+        - down_proj
+
+train:
+  epochs: 3
+  per_device_batch_size: 32
+  gradient_accumulation_steps: 4
+  learning_rate: 2e-4
+  weight_decay: 0.01
+  warmup_ratio: 0.03
+  max_history_len: 20
+  max_seq_len: 512
+  aux_ratio: 0.1
+  seed: 42
+  wandb_project: genrec
+  wandb_run_name: sft_${data.domain}_v1
+  wandb_log_steps: 10
+  output_dir: data/checkpoints/${data.domain}/sft
+  tokenizer_save_dir: ${train.output_dir}/tokenizer
+
+distributed:
+  mixed_precision: bf16
+  deepspeed:
+    train_batch_size: auto
+    train_micro_batch_size_per_gpu: ${train.per_device_batch_size}
+    gradient_accumulation_steps: ${train.gradient_accumulation_steps}
+    gradient_clipping: 1.0
+    bf16:
+      enabled: true
+    zero_optimization:
+      stage: 2
+      contiguous_gradients: true
+      overlap_comm: true
+      reduce_scatter: true
+      reduce_bucket_size: 200000000
+      allgather_bucket_size: 200000000
+      offload_optimizer:
+        device: none
+      offload_param:
+        device: none
+
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+  job:
+    chdir: false
+
+logging:
+  output_path: logs/sft_${data.domain}.log
+  level: INFO
+  mode: w

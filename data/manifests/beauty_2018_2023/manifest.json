@@ -1,0 +1,299 @@
+{
+  "dataset": "beauty_2018_2023",
+  "domain": "beauty",
+  "processed_directory": "data/processed/beauty_2018_2023",
+  "checks": {
+    "item_id_mapping_bijective_and_dense": {
+      "passed": true,
+      "detail": {
+        "mapped_items": 148338
+      }
+    },
+    "user_id_mapping_bijective_and_dense": {
+      "passed": true,
+      "detail": {
+        "mapped_users": 446314
+      }
+    },
+    "one_valid_and_test_target_per_user": {
+      "passed": true,
+      "detail": {
+        "valid_rows": 446314,
+        "test_rows": 446314
+      }
+    },
+    "sequence_users_match_user_mapping": {
+      "passed": true,
+      "detail": {
+        "mapped_users": 446314,
+        "sequence_users": 446314,
+        "missing_sequence_users": 0,
+        "extra_sequence_users": 0
+      }
+    },
+    "valid_and_test_users_match_user_mapping": {
+      "passed": true,
+      "detail": {
+        "valid_users": 446314,
+        "test_users": 446314,
+        "mapped_users": 446314
+      }
+    },
+    "metadata_ids_match_item_mapping": {
+      "passed": true,
+      "detail": {
+        "mapped_items": 148338,
+        "metadata_items": 148338,
+        "missing_metadata": 0,
+        "extra_metadata": 0
+      }
+    },
+    "heldout_targets_covered_by_item_map_and_metadata": {
+      "passed": true,
+      "detail": {
+        "valid_targets": 446314,
+        "test_targets": 446314,
+        "bad_target_rows": 0,
+        "examples": []
+      }
+    },
+    "heldout_users_covered_by_user_map": {
+      "passed": true,
+      "detail": {
+        "bad_user_rows": 0,
+        "examples": []
+      }
+    },
+    "all_sequences_and_targets_use_mapped_items": {
+      "passed": true,
+      "detail": {
+        "unmapped_item_ids": 0
+      }
+    },
+    "k_core_minimum_degree_at_least_five": {
+      "passed": true,
+      "detail": {
+        "min_user_interactions": 5,
+        "min_item_interactions": 5
+      }
+    },
+    "raw_timestamp_order_reproduces_saved_leave_two_out_split": {
+      "passed": true,
+      "detail": {
+        "mapped_raw_users": 446314,
+        "mapped_users": 446314,
+        "mapped_raw_interactions": 4096117,
+        "stored_interactions": 4096117,
+        "exact_train_histories": 446314,
+        "exact_valid_targets": 446314,
+        "exact_test_targets": 446314,
+        "same_timestamp_users": 12055,
+        "same_timestamp_adjacent_pairs": 65809,
+        "valid_test_same_timestamp_users": 12036,
+        "mismatch_examples": []
+      }
+    }
+  },
+  "failed_checks": [],
+  "metrics": {
+    "counts": {
+      "users": 446314,
+      "items": 148338,
+      "train_interactions": 3203489,
+      "valid_samples": 446314,
+      "test_samples": 446314,
+      "total_interactions": 4096117,
+      "unique_valid_target_items": 94787,
+      "unique_test_target_items": 91573,
+      "unique_heldout_target_items": 115823
+    },
+    "train_history_length": {
+      "count": 446314,
+      "min": 3,
+      "p50": 4,
+      "p90": 12,
+      "p95": 16,
+      "p99": 43,
+      "max": 2151,
+      "mean": 7.1777
+    },
+    "heldout_target_coverage": {
+      "valid_item_map_rate": 1.0,
+      "test_item_map_rate": 1.0,
+      "valid_metadata_rate": 1.0,
+      "test_metadata_rate": 1.0
+    },
+    "metadata_missingness": {
+      "item_count": 148338,
+      "fields": {
+        "title": {
+          "missing_key_count": 0,
+          "empty_or_whitespace_count": 4,
+          "empty_or_whitespace_rate": 2.7e-05
+        },
+        "description": {
+          "missing_key_count": 0,
+          "empty_or_whitespace_count": 87615,
+          "empty_or_whitespace_rate": 0.590644
+        },
+        "features": {
+          "missing_key_count": 0,
+          "empty_or_whitespace_count": 22346,
+          "empty_or_whitespace_rate": 0.150642
+        },
+        "categories": {
+          "missing_key_count": 0,
+          "empty_or_whitespace_count": 0,
+          "empty_or_whitespace_rate": 0.0
+        },
+        "store": {
+          "missing_key_count": 0,
+          "empty_or_whitespace_count": 8436,
+          "empty_or_whitespace_rate": 0.05687
+        },
+        "details": {
+          "missing_key_count": 0,
+          "empty_or_whitespace_count": 625,
+          "empty_or_whitespace_rate": 0.004213
+        }
+      },
+      "items_empty_across_stage2_text_fields": 0,
+      "stage2_text_fields": [
+        "title",
+        "features",
+        "categories"
+      ]
+    },
+    "degree_audit": {
+      "user_interactions_including_two_targets": {
+        "count": 446314,
+        "min": 5,
+        "p50": 6,
+        "p90": 14,
+        "p95": 18,
+        "p99": 45,
+        "max": 2153,
+        "mean": 9.1777
+      },
+      "item_interaction_frequency": {
+        "count": 148338,
+        "min": 5,
+        "p50": 12,
+        "p90": 50,
+        "p95": 90,
+        "p99": 285,
+        "max": 8155,
+        "mean": 27.6134
+      }
+    },
+    "temporal_order": {
+      "mapped_raw_users": 446314,
+      "mapped_users": 446314,
+      "mapped_raw_interactions": 4096117,
+      "stored_interactions": 4096117,
+      "exact_train_histories": 446314,
+      "exact_valid_targets": 446314,
+      "exact_test_targets": 446314,
+      "same_timestamp_users": 12055,
+      "same_timestamp_adjacent_pairs": 65809,
+      "valid_test_same_timestamp_users": 12036,
+      "mismatch_examples": []
+    }
+  },
+  "preprocessing_recipe": {
+    "review_date_window_utc_inclusive": [
+      "2018-01-01",
+      "2023-12-31"
+    ],
+    "k_core_threshold": 5,
+    "split": "per-user timestamp ascending; final interaction=test, previous=valid",
+    "timestamp_tie_break": "stable source JSONL order, matching Python sorted()",
+    "source_timezone": "UTC"
+  },
+  "source_artifacts": {
+    "reviews": {
+      "path": "data/raw/Beauty.jsonl",
+      "size_bytes": 11021458876,
+      "sha256": "24f139d51014f50c052b69bdf5ca95e2e2656e80aabda2da3fdad29bb1931a53",
+      "jsonl_records": 23911390,
+      "malformed_json_records_skipped_like_preprocessor": 0,
+      "invalid_timestamp_records": 0,
+      "records_in_date_window": 17129588,
+      "records_with_both_final_mapped_ids": 4096117
+    },
+    "metadata": {
+      "path": "data/raw/meta_Beauty.jsonl",
+      "size_bytes": 2835194976,
+      "sha256": "c8a69eba6579f1a3a2b6d6d564846f3c59839d0c859ff180a63a97a245c3bec2"
+    }
+  },
+  "processed_artifacts": {
+    "item2id.json": {
+      "path": "data/processed/beauty_2018_2023/item2id.json",
+      "size_bytes": 3152326,
+      "sha256": "04fa47c87a5d8e6891f9b4a31ef649d750cf1574421625f037d06116402d3deb"
+    },
+    "user2id.json": {
+      "path": "data/processed/beauty_2018_2023/user2id.json",
+      "size_bytes": 17741574,
+      "sha256": "d2ee67a98e20837b280fd6740c755ce3c3ac578644d3bdb3f3e78a66ab7777b4"
+    },
+    "item_meta.json": {
+      "path": "data/processed/beauty_2018_2023/item_meta.json",
+      "size_bytes": 246482450,
+      "sha256": "24659bc3aca62b59c75f63e11b06ca5f9663c79083072fb63830c474843b9c99"
+    },
+    "user_sequences.json": {
+      "path": "data/processed/beauty_2018_2023/user_sequences.json",
+      "size_bytes": 28758274,
+      "sha256": "50969ca81d701fa366a7e91793780f939a9a8e3ea06970f650847ebdeba3af81"
+    },
+    "valid.csv": {
+      "path": "data/processed/beauty_2018_2023/valid.csv",
+      "size_bytes": 5850248,
+      "sha256": "dd24605703cd0c6ab32bc6e97cfd1a81c4983350eb72849ca810a69656cd1e16"
+    },
+    "test.csv": {
+      "path": "data/processed/beauty_2018_2023/test.csv",
+      "size_bytes": 5869686,
+      "sha256": "6294d7cfde6ae82d0e3af2f8a3a4f5ddd3431d7bba0b2a28d41ac25a0026a4cd"
+    }
+  },
+  "preprocessing_code": {
+    "src/data/amazon_process.py": {
+      "path": "src/data/amazon_process.py",
+      "size_bytes": 9907,
+      "sha256": "b4ebb9019506fc1c79360423745b5de307d72630884b0cd8574771c30a6cf767"
+    },
+    "scripts/data/run_process.py": {
+      "path": "scripts/data/run_process.py",
+      "size_bytes": 1865,
+      "sha256": "e47a329ad5a5c225ec98bf27b1cc5f0edb271ae65c58d6e7acc6db626aae691e"
+    }
+  },
+  "git_head": "a73a0c3aa72c85c143a0121f7a5c08a58e17869e",
+  "fixed_sample_ids": {
+    "valid": {
+      "path": "data/manifests/beauty_2018_2023/valid_sample_ids.csv",
+      "size_bytes": 24978817,
+      "sha256": "ea1f9f510867973d6cc4a8634b016b3c9d204579652e32cf149dd50e780b3e64",
+      "rows": 446314,
+      "sample_id_format": "beauty_2018_2023:valid:<user_id>:<target_item_id>"
+    },
+    "test": {
+      "path": "data/manifests/beauty_2018_2023/test_sample_ids.csv",
+      "size_bytes": 24571379,
+      "sha256": "71a402959878e1c7856246a1e375e3549519c5fb96e2fe0eff797f58ce3c0f47",
+      "rows": 446314,
+      "sample_id_format": "beauty_2018_2023:test:<user_id>:<target_item_id>"
+    }
+  },
+  "freeze_status": "frozen",
+  "audit_timestamp_utc": "2026-10-04T13:53:53.021138+00:00",
+  "python_version": "3.13.12",
+  "audit_script": {
+    "path": "scripts/data/audit_freeze_processed.py",
+    "size_bytes": 21910,
+    "sha256": "fe37bfe457d7097ad27f6fb836ed7a6220c5c62de09b14edf4477364fd18dd33"
+  }
+}

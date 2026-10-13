@@ -12,6 +12,8 @@ build/
 # 数据和模型（不提交大文件）
 data/raw/
 data/processed/
+data/artifacts/
+data/eval_results/
 *.jsonl
 *.json.gz
 *.parquet

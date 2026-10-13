@@ -1,8 +1,8 @@
 """
 Stage 3 SFT 训练启动脚本。
 
-单卡：
-  python scripts/train/run_sft.py
+双卡 + DeepSpeed ZeRO-2：
+  CUDA_VISIBLE_DEVICES=1,2 accelerate launch --multi_gpu --num_processes 2 --mixed_precision bf16 scripts/train/run_sft.py
 
 覆盖超参：
   python scripts/train/run_sft.py train.epochs=5 train.learning_rate=1e-4
@@ -17,21 +17,12 @@ from omegaconf import DictConfig
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-log_file = Path(__file__).resolve().parents[2] / "logs" / "sft.log"
-log_file.parent.mkdir(exist_ok=True)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
-    handlers=[
-        logging.FileHandler(log_file, mode="w"),
-        logging.StreamHandler(sys.stdout),
-    ],
-    force=True,
-)
+from utils.logging_config import configure_logging
 
 
-@hydra.main(config_path="../../configs", config_name="stage3", version_base=None)
+@hydra.main(config_path="../../configs", config_name="sft", version_base=None)
 def main(cfg: DictConfig) -> None:
+    configure_logging(cfg.logging.output_path, cfg.logging.level, cfg.logging.mode)
     from models.llm.trainer import run_sft
     run_sft(cfg)
 

@@ -3,10 +3,21 @@
 import json
 from pathlib import Path
 
+from huggingface_hub import snapshot_download
 from transformers import AutoTokenizer
 
 
 LAYER_PREFIXES = ["a", "b", "c", "d"]
+
+
+def resolve_model_source(model_name: str, local_files_only: bool = False) -> str:
+    """Resolve a Hub model ID to its cached snapshot when offline."""
+    if not local_files_only:
+        return model_name
+    local_path = Path(model_name).expanduser()
+    if local_path.is_dir():
+        return str(local_path.resolve())
+    return snapshot_download(repo_id=model_name, local_files_only=True)
 
 
 def build_sid_tokens(num_layers: int, codebook_size: int) -> list[str]:
@@ -25,6 +36,7 @@ def load_tokenizer(
     codebook_size: int,
     save_dir: str | None = None,
     tokenizer_path: str | None = None,
+    local_files_only: bool = False,
 ) -> AutoTokenizer:
     """加载并扩展 tokenizer。
 
@@ -34,16 +46,29 @@ def load_tokenizer(
         codebook_size: 每层码本大小
         save_dir: 扩展后 tokenizer 的保存路径，None 则不保存
         tokenizer_path: 已扩展的 tokenizer 路径，如提供则直接加载（优先级高于 model_name）
+        local_files_only: 仅从本地路径或 Hugging Face 缓存读取，不访问 Hub
     """
+    tokenizer_source = tokenizer_path if tokenizer_path is not None else model_name
+    if local_files_only:
+        tokenizer_source = resolve_model_source(tokenizer_source, local_files_only=True)
+
     # 如果提供了 tokenizer_path，直接加载
     if tokenizer_path is not None:
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
+        tokenizer = AutoTokenizer.from_pretrained(
+            tokenizer_source,
+            trust_remote_code=True,
+            local_files_only=local_files_only,
+        )
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
         return tokenizer
 
     # 否则从 base model 动态扩展
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(
+        tokenizer_source,
+        trust_remote_code=True,
+        local_files_only=local_files_only,
+    )
 
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token

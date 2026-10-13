@@ -5,8 +5,8 @@ from functools import partial
 from pathlib import Path
 
 import torch
-from accelerate import Accelerator
-from omegaconf import DictConfig
+from accelerate import Accelerator, DeepSpeedPlugin
+from omegaconf import DictConfig, OmegaConf
 from peft import LoraConfig, TaskType, get_peft_model
 from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM, get_cosine_schedule_with_warmup
@@ -17,7 +17,7 @@ from .dataset import (
     SFTDataset,
     collate_fn,
 )
-from .tokenizer import get_item_sid_token_ids, load_tokenizer
+from .tokenizer import get_item_sid_token_ids, load_tokenizer, resolve_model_source
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,18 @@ def run_sft(cfg: DictConfig) -> None:
     mcfg = cfg.model.llm
     tcfg = cfg.train
     dcfg = cfg.data
-    accelerator = Accelerator(gradient_accumulation_steps=tcfg.gradient_accumulation_steps)
+    distributed_cfg = cfg.get("distributed", {})
+    deepspeed_cfg = distributed_cfg.get("deepspeed")
+    deepspeed_plugin = None
+    if deepspeed_cfg is not None:
+        deepspeed_plugin = DeepSpeedPlugin(
+            hf_ds_config=OmegaConf.to_container(deepspeed_cfg, resolve=True)
+        )
+    accelerator = Accelerator(
+        gradient_accumulation_steps=tcfg.gradient_accumulation_steps,
+        mixed_precision=distributed_cfg.get("mixed_precision"),
+        deepspeed_plugin=deepspeed_plugin,
+    )
 
     # ── wandb 初始化 ─────────────────────────────────────────────────────────
     if accelerator.is_main_process and hasattr(tcfg, "wandb_project"):
@@ -51,12 +62,15 @@ def run_sft(cfg: DictConfig) -> None:
 
     # ── tokenizer ──────────────────────────────────────────────────────────
     logger.info("加载并扩展 tokenizer...")
+    local_files_only = getattr(mcfg, "local_files_only", False)
+    model_source = resolve_model_source(mcfg.base_model, local_files_only=local_files_only)
     tokenizer = load_tokenizer(
-        model_name=mcfg.base_model,
+        model_name=model_source,
         num_layers=mcfg.rqvae.num_layers,
         codebook_size=mcfg.rqvae.codebook_size,
         save_dir=tcfg.tokenizer_save_dir,
         tokenizer_path=getattr(mcfg, "tokenizer_path", None),  # 如果配置了预扩展 tokenizer，直接加载
+        local_files_only=local_files_only,
     )
     logger.info(f"tokenizer 词表大小: {len(tokenizer)}")
 
@@ -115,11 +129,12 @@ def run_sft(cfg: DictConfig) -> None:
     )
 
     # ── 模型 ───────────────────────────────────────────────────────────────
-    logger.info(f"加载基座模型: {mcfg.base_model}")
+    logger.info(f"加载基座模型: {model_source}")
     model = AutoModelForCausalLM.from_pretrained(
-        mcfg.base_model,
+        model_source,
         torch_dtype=torch.bfloat16,
         trust_remote_code=True,
+        local_files_only=local_files_only,
     )
     model.resize_token_embeddings(len(tokenizer))
 
@@ -138,9 +153,9 @@ def run_sft(cfg: DictConfig) -> None:
 
     # ── optimizer / scheduler ──────────────────────────────────────────────
     ga_steps = tcfg.gradient_accumulation_steps
-    print(f"[DEBUG] ga_steps={ga_steps}", flush=True)
+    logger.info("gradient_accumulation_steps=%s", ga_steps)
     total_steps = len(train_loader) * tcfg.epochs // ga_steps
-    print(f"[DEBUG] total_steps={total_steps}", flush=True)
+    logger.info("total_steps=%s", total_steps)
     warmup_steps = int(total_steps * tcfg.warmup_ratio)
 
     optimizer = torch.optim.AdamW(
@@ -148,20 +163,20 @@ def run_sft(cfg: DictConfig) -> None:
         lr=tcfg.learning_rate,
         weight_decay=tcfg.weight_decay,
     )
-    print("[DEBUG] optimizer created", flush=True)
+    logger.info("optimizer created")
     scheduler = get_cosine_schedule_with_warmup(
         optimizer,
         num_warmup_steps=warmup_steps,
         num_training_steps=total_steps,
     )
-    print("[DEBUG] scheduler created", flush=True)
+    logger.info("scheduler created")
 
     # ── accelerate 接管分布式 / DeepSpeed ──────────────────────────────────
-    print("[DEBUG] calling accelerator.prepare...", flush=True)
+    logger.info("calling accelerator.prepare...")
     model, optimizer, train_loader, valid_loader, scheduler = accelerator.prepare(
         model, optimizer, train_loader, valid_loader, scheduler
     )
-    print("[DEBUG] accelerator.prepare done", flush=True)
+    logger.info("accelerator.prepare done")
 
     # ── 训练循环 ───────────────────────────────────────────────────────────
     import faulthandler, signal
@@ -169,23 +184,23 @@ def run_sft(cfg: DictConfig) -> None:
 
     best_valid_loss = float("inf")
     output_dir = Path(tcfg.output_dir)
-    print(f"[DEBUG] output_dir={output_dir.resolve()}", flush=True)
+    logger.info("output_dir=%s", output_dir.resolve())
     output_dir.mkdir(parents=True, exist_ok=True)
-    print("[DEBUG] output_dir created", flush=True)
+    logger.info("output_dir created")
 
     log_steps = getattr(tcfg, "wandb_log_steps", 50)
     global_step = 0
 
     for epoch in range(1, tcfg.epochs + 1):
-        print(f"[DEBUG] epoch {epoch} start", flush=True)
+        logger.info("epoch %s start", epoch)
         model.train()
         total_loss = 0.0
         optimizer.zero_grad()
-        print("[DEBUG] entering train_loader loop", flush=True)
+        logger.info("entering train_loader loop")
 
         for step, batch in enumerate(train_loader):
             if step == 0:
-                print(f"[DEBUG] first batch received, input_ids shape={batch['input_ids'].shape}", flush=True)
+                logger.info("first batch received, input_ids shape=%s", batch["input_ids"].shape)
             with accelerator.accumulate(model):
                 outputs = model(
                     input_ids=batch["input_ids"],

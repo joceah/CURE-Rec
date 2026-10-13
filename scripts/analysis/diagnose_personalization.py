@@ -9,8 +9,8 @@
 
 用法：
     python scripts/analysis/diagnose_personalization.py \\
-        --model_path data/checkpoints/sft/merged \\
-        --tokenizer_path data/checkpoints/sft/tokenizer \\
+        --model_path data/checkpoints/beauty/sft/merged \\
+        --tokenizer_path data/checkpoints/beauty/sft/tokenizer \\
         --sample_size 500
 """
 import argparse
@@ -289,14 +289,14 @@ def analyze_popularity_baseline(user_sequences, item_sid_ids, samples, K_list=(1
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_path", default="data/checkpoints/sft/merged")
-    parser.add_argument("--tokenizer_path", default="data/checkpoints/sft/tokenizer")
+    parser.add_argument("--model_path", default="data/checkpoints/beauty/sft/merged")
+    parser.add_argument("--tokenizer_path", default="data/checkpoints/beauty/sft/tokenizer")
     parser.add_argument("--item_index_path",
-                        default="data/processed/beauty_2021_2023/item.index.json")
+                        default="data/artifacts/beauty_2018_2023/item.index.json")
     parser.add_argument("--user_sequences_path",
-                        default="data/processed/beauty_2021_2023/user_sequences.json")
+                        default="data/processed/beauty_2018_2023/user_sequences.json")
     parser.add_argument("--test_csv_path",
-                        default="data/processed/beauty_2021_2023/test.csv")
+                        default="data/processed/beauty_2018_2023/test.csv")
     parser.add_argument("--output_path",
                         default="data/eval_results/diagnose_sft.json")
     parser.add_argument("--sample_size", type=int, default=500,

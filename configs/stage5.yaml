@@ -1,4 +1,0 @@
-defaults:
-  - eval: default
-  - override hydra/job_logging: disabled
-  - _self_

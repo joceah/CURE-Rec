@@ -1,4 +1,5 @@
 """Hydra 启动脚本，调用 evaluator.evaluate()。"""
+import logging
 import sys
 from pathlib import Path
 
@@ -6,17 +7,19 @@ from pathlib import Path
 project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root / "src"))
 
+from utils.logging_config import configure_logging
+
+logger = logging.getLogger(__name__)
+
 import hydra
 from omegaconf import DictConfig, OmegaConf
 from inference.evaluator import evaluate
 
 
-@hydra.main(config_path="../../configs", config_name="stage5", version_base=None)
+@hydra.main(config_path="../../configs", config_name="eval", version_base=None)
 def main(cfg: DictConfig):
-    print("=" * 80)
-    print("Stage 5: SFT Evaluation")
-    print("=" * 80)
-    print(OmegaConf.to_yaml(cfg))
+    configure_logging(cfg.logging.output_path, cfg.logging.level, cfg.logging.mode)
+    logger.info("Stage 4: SFT Evaluation\\n%s", OmegaConf.to_yaml(cfg))
 
     # 构造输出路径
     output_path = str(Path(cfg.eval.output_dir) / f"{cfg.eval.output_name}.json")
@@ -44,11 +47,11 @@ def main(cfg: DictConfig):
     )
 
     if metrics:  # 主进程
-        print("\n" + "=" * 80)
-        print("Evaluation Complete!")
-        print("=" * 80)
+        logger.info("=" * 80)
+        logger.info("Evaluation Complete!")
+        logger.info("=" * 80)
         for k, v in sorted(metrics.items()):
-            print(f"{k:12s}: {v:.4f}")
+            logger.info("%-12s: %.4f", k, v)
 
 
 if __name__ == "__main__":
