@@ -18,17 +18,22 @@
 - 只有存在真正独立的工作流，且委派能节省时间或提升质量时才使用子 Agent。
 - 共享状态、连续决策和简单任务由当前 Agent 直接完成；委派任务必须有明确输入、输出和完成判据，最终结论由主 Agent 汇总并验证。
 ## 目前开发阶段（可实时更新）
-- 当前处于 **Phase 0 — Baseline Sanitation & Reproducibility**，其中 Phase 0A–0C 已完成，当前重点是 Phase 0D–0E 的 SFT baseline freeze 与统一 evaluation。
+- **Phase 0 已闭环**：基础 SFT baseline 已完成训练与评估，当前正式进入 **Phase 1 — Minimal Latent-CE / CURE v1 implementation**。
 - Amazon **Beauty 2018–2023** 与 **Sports 2018–2023** 已完成本地数据处理、数据审计 / freeze、text embedding、RQ-VAE 与 3-code Semantic ID artifacts。
 - leave-two-out test evaluation 按 `train + valid → test` 执行；Beauty 作为 development domain，Sports 作为冻结 recipe 后的 confirmation domain。
 - 研究路线明确采用 **method-first**：优先提升 CURE 自身推荐性能，再用 CURE-specific intervention 证明 latent reasoning 对性能提升有实际贡献。
+- 当前 CURE v1 实现计划见 `docs/cure_v1_implementation_plan.md`。
+- Phase 1 第一轮固定使用 **K=1 latent reasoner + gated residual fusion**；优先从冻结的 merged SFT checkpoint 初始化，不使用 forward hook，不使用 utilization / anchor / multi-intent。
 - 不展开跨架构 latent-reasoning faithfulness audit；CARE 等外部方法主要作为后期标准推荐性能 baseline。
 ## 下一步计划（可实时更新）
-- 完成并冻结 Beauty Qwen SFT baseline，随后以冻结 recipe 跑 Sports confirmation baseline。
-- 完成统一 baseline evaluation 与 artifact identity 记录，闭环 Phase 0。
-- Phase 1 实现 K=1 Latent-CE，首先验证 latent architecture 本身能否达到或超过 SFT。
-- Phase 2 实现 CURE-U / CURE-UA，重点看 HR / NDCG 相比 Latent-CE 是否稳定提升。
+- 新建 `src/models/cure/`，先实现 `dataset.py`、`reasoner.py`、`model.py`、`losses.py`、`trainer.py`。
+- CURE v1 的 latent 只读取 history contextual states，禁止读取 target SID；dataset 显式返回 history positions，避免通过 magic offset 推断。
+- 第一轮 Latent-CE 冻结 Qwen backbone / LM head / SID embeddings，只训练 reasoner、latent projection 和 fusion gate。
+- 训练与 generation 必须共用同一 fusion 路径；禁止使用 MIR 风格 forward hook。
+- 优先完成六个关键验证：Zero-Z≈SFT、无 target leakage、backbone 无梯度、reasoner/fusion 有梯度、checkpoint round-trip、train/generation fusion parity。
+- 上述测试通过后，在 Beauty 跑 Latent-CE，并以 HR / NDCG 对比冻结 SFT baseline。
+- 只有 Latent-CE 至少达到或基本持平 SFT 后，才进入 Phase 2 的 CURE-U / CURE-UA；否则先改 representation / fusion，不通过 utilization loss 强迫依赖低质量 latent。
 - Phase 3 只针对 CURE 自身做 normal / zero / shuffle / matched intervention，用于证明 latent pathway 对增益有可验证贡献。
-- CARE 已保留在 `baselines/care/`，未来在 Phase 5 作为 SID-based reasoning 性能 baseline；当前不做 progressive-off、state-swap 等 CARE-specific faithfulness audit。
+- CARE 已保留在 `baselines/care/`，未来在 Phase 5 作为 SID-based reasoning 性能 baseline；当前不做 CARE-specific faithfulness audit。
 - 只有 CURE 主结果稳定后，再考虑是否加入 S²GR、IBA、SCoTER 等额外性能 baseline。
 - 注意，为了防止该文档无效堆积过度膨胀，当完成某一阶段的开发任务时，请把开发记录存在![开发进度文档](docs/develop_log.md)里，开发进度文档除了我告知你审阅的情况下，正常情况下**禁止**阅读该文档，避免浪费大量token阅读过去开发记录
