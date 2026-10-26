@@ -1,795 +1,457 @@
 # CURE-Rec Research Plan
 
-> 更新时间：2026-10-13  
-> Working title: **CURE-Rec: Causal Utilization-Regularized rEasoning for Generative Recommendation**  
-> 主线定位：**method-first generative recommendation**。核心目标是先做出更强的推荐方法，再证明 CURE 中的 latent reasoning 确实对性能提升产生了可验证的贡献。
+> 更新时间：2026-10-26  
+> Working title: **CURE-Rec: Counterfactual Utility-Regularized rEasoning for Generative Recommendation**  
+> 主线：**method-first generative recommendation**。CURE 的目标不是增加更多 latent depth，而是学习一个对强 SFT baseline 有真实增量价值、具有个性化、且在错误 latent 下安全回退的 latent decision state。
 
 ---
 
-# 0. 项目定位与研究边界
+# 0. 项目定位
 
-CURE-Rec 当前不试图回答一个过于宽泛的问题：
+CURE-Rec 不试图建立一个覆盖所有 latent-reasoning recommender 的统一 faithfulness benchmark。论文首先必须回答：
 
-> “现有所有隐式推理推荐模型到底有没有真正利用 reasoning？”
+> **Can a latent decision state improve a strong Semantic-ID generative recommender by contributing personalized information beyond the baseline, rather than merely adding capacity or duplicating history representations?**
 
-这个问题本身很有研究价值，但如果认真展开，需要针对大量不同架构分别设计 intervention，容易演变成一个大型 evaluation / survey-style project。当前项目不以此为目标。
+核心行为目标写成一个非对称关系：
 
-CURE-Rec 的论文优先级明确为：
+$$
+\boxed{
+\text{Correct personalized } Z
+\;>\;
+\text{Frozen SFT baseline}
+\;\approx\;
+\text{Matched wrong } Z
+}
+$$
 
-1. **Recommendation utility first**：CURE 必须首先在 HR / NDCG 等主要推荐指标上表现有竞争力，最好稳定优于基础 SFT / TIGER-style baseline。
-2. **Method contribution second**：提出一个轻量、清晰、可复现的 latent reasoning framework，而不是堆叠大量 reasoning 模块。
-3. **Mechanistic evidence as supporting story**：只针对 CURE 自身证明 latent reasoning 不是装饰性表示，而是对性能提升有实际贡献。
-4. **External methods are performance baselines**：CARE、S²GR、IBA、SCoTER 等外部方法主要用于最终性能比较；除非后期论文方向发生变化，不要求为每种架构设计专属 faithfulness audit。
+它包含三个条件：
 
-因此论文理想叙事是：
+1. **Positive lift**：正确 latent 必须优于 baseline；
+2. **Personalized lift**：自己的 latent 必须优于 matched donor latent；
+3. **Safe fallback**：错误 latent 不能通过破坏预测制造 margin，而应回退到 baseline-like behavior。
 
-> **CURE improves generative recommendation by learning a useful latent reasoning pathway, and controlled interventions show that the learned latent state is genuinely responsible for part of the performance gain.**
-
-这和“建立一个通用 latent-reasoning faithfulness benchmark”是两个不同的项目。当前只做前者。
+推荐性能始终是第一目标；机制指标只服务于解释 CURE 自身。
 
 ---
 
-# 1. 从 MIR 到 CURE-Rec
+# 1. Novelty Boundary
 
-最初的研究动机是：
+正式写论文时不能把以下单点当作原创：
 
-> 显式自然语言 CoT 成本高，能否把额外推理压缩成低成本的 latent computation？
+- 增加 latent computation depth；
+- frozen recommender 上的 residual correction；
+- latent 相对 no-latent 的 target-likelihood gain；
+- KL preservation / distillation；
+- 用 intervention 检查 reasoning 是否影响输出。
 
-MIR 与早期 implicit-CoT 路线暴露了几个关键问题：
+近期工作已经覆盖这些组成部分。例如 HiLaR 使用 latent state 的 marginal target-likelihood gain；PRL 显式学习 base recommender 的 residual；通用 reasoning 中也已有通过有/无 rationale distribution contrast 提高 reasoning dependence 的工作。
 
-- teacher CoT 可能只是 post-hoc explanation，而不是 predictive reasoning；
-- MSE / cosine 对齐只能说明 representation 相似，不说明它对推荐有用；
-- 多个 latent intent 可以彼此不同，但不一定功能不同；
-- generator 可以绕过 latent pathway，继续主要依赖 history → target 的直接路径；
-- 训练和推理路径一旦不一致，latent module 的实验结论就不可信。
+当前候选贡献不是某一个组件，而是下面这个 **asymmetric safe personalized residual formulation**：
 
-因此 CURE 不再从复杂的 multi-intent / CoT distillation 开始，而先解决一个更基本的问题：
+> 在 SID generative recommendation 中，训练 latent state 只通过“为正确用户增加价值”获得增益；matched 错误 latent 必须失去这部分个性化增益，但不能让模型比 frozen baseline 更坏。
 
-> **能否设计一个简单的 latent reasoning pathway，使它既提升推荐性能，又能通过干预证明它确实贡献了这部分提升？**
+相关来源（正式投稿前再次核对最新版）：
 
----
-
-# 2. 当前核心假设
-
-## H1 — Useful Latent Reasoning
-
-一个好的 latent state 不应该只“看起来合理”，而应该带来额外的 recommendation utility：
-
-$$
-P(y \mid H, Z)
->
-P_0(y \mid H)
-$$
-
-其中 $P_0$ 是没有 latent reasoning 的 SFT baseline。
-
-## H2 — Personalized Contribution
-
-如果 latent reasoning 真正在建模当前用户，它应该比其他用户的 latent 更有帮助：
-
-$$
-\log P(y_i \mid H_i, Z_i)
->
-\log P(y_i \mid H_i, \tilde Z_i)
-$$
-
-其中 $\tilde Z_i$ 是来自 matched donor 的 counterfactual latent。
-
-## H3 — Utilization Can Be Explicitly Trained
-
-普通 CE 训练不保证 generator 会主动使用 latent pathway，因此可以通过 utilization regularization 让正确 latent 提供额外增益，同时避免模型通过“破坏错误 latent 分支”作弊。
+- HiLaR: https://arxiv.org/abs/2607.27760
+- Probabilistic Residual Learning: https://arxiv.org/abs/2607.20863
+- Rationale Contrastive Decoding / context-aware CoT decoding: https://arxiv.org/abs/2610.29518
 
 ---
 
-# 3. CURE Framework
+# 2. Frozen Baseline
 
-## 3.1 最小结构
+基础模型是已经训练完成的 Qwen/TIGER-style SID generator：
 
-第一版保持简单：
+$$
+P_0(y\mid H)
+$$
 
-~~~text
-History H
-   ↓
-Qwen / TIGER-style SID Generator
-   ├────────────── direct recommendation path
-   │
-   ↓
-Latent Reasoner R
-   ↓
-Z (K = 1)
-   ↓
-Gated Fusion
-   ↓
-SID Prediction
-~~~
+其中：
 
-Phase 1–3 只使用 $K=1$。
+- $H$：用户交互历史；
+- $y=(y_1,y_2,y_3)$：目标商品的三层 Semantic ID；
+- baseline 使用与正式评估完全一致的 prefix-constrained SID decoding。
 
-暂时不加入：
+CURE 第一阶段冻结 baseline。这样性能变化更容易归因到新增 residual pathway，而不是再次微调整个 Qwen。
 
-- explicit CoT；
-- teacher CoT distillation；
-- K=4 multi-intent；
-- GRPO；
-- posterior-prior；
-- complex dynamic routing；
-- semantic hierarchy；
-- 额外 diversity loss。
-
-原则是：
-
-> **先证明一个 latent 有用，再讨论多个 latent。**
+Beauty SFT 的当前 5k test reference：HR@10 = 0.0448，NDCG@10 = 0.03559。后续方法开发不继续使用 test 调参，只在 validation 上选择结构与超参。
 
 ---
 
-## 3.2 Recommendation Loss
+# 3. CURE Architecture: Baseline-Aware Complementary State
+
+## 3.1 Baseline decision state
+
+冻结 SFT 对 history prompt 产生 baseline decision representation：
 
 $$
-\mathcal{L}_{rec}
+B_i=h_i^0
+$$
+
+$B_i$ 只依赖 history/prompt，不包含 target。
+
+同时保留 history item contextual states：
+
+$$
+E_i=[e_{i1},\ldots,e_{in}]
+$$
+
+## 3.2 Baseline-conditioned latent reasoner
+
+不使用对所有用户相同的固定 learned query。让当前 baseline decision 生成 query：
+
+$$
+q_i=W_q B_i
+$$
+
+然后重新查询 history evidence：
+
+$$
+Z_i=R_\phi(q_i,E_i)
+$$
+
+语义不是“再总结一次用户历史”，而是：
+
+> baseline 已经形成一个初步决策；latent reasoner 根据这个决策状态回看历史，寻找可用于修正当前预测的个性化 evidence。
+
+第一版只使用一个 latent state，不把额外 depth 作为贡献点。
+
+---
+
+# 4. Residual Decision Correction
+
+CURE 不替代 SFT，也不重新学习完整 vocabulary distribution。对第 $t$ 个 SID stage，baseline 给出：
+
+$$
+\ell^0_{i,t}(v)
+$$
+
+当前 prefix 对应的合法 SID children 集合记为：
+
+$$
+\mathcal C_{i,t}
+$$
+
+CURE 只生成 candidate-space correction：
+
+$$
+r_{i,t}(v\mid H_i,Z_i)
+$$
+
+最终 logits：
+
+$$
+\ell_{i,t}(v)
 =
--\log P(y \mid H,Z)
-$$
-
-$y$ 为目标 item 的 SID 序列。
-
----
-
-## 3.3 Utilization Loss
-
-对当前样本构造 matched counterfactual latent $\tilde Z$：
-
-$$
-\mathcal{L}_{util}
-=
-\max
-\left(
-0,
-\;m-
-\left[
-\log P(y\mid H,Z)
--
-\log P(y\mid H,\tilde Z)
-\right]
-\right)
-$$
-
-它要求：
-
-> 当前用户自己的 latent 应比一个“相似但错误”的 latent 更有助于预测正确目标。
-
-matched donor 优先按以下因素控制：
-
-- history length；
-- target popularity；
-- baseline difficulty；
-- 可选 coarse category。
-
-这样比完全随机 shuffle 更不容易被解释为 OOD perturbation。
-
----
-
-## 3.4 Baseline Anchor
-
-单独优化 $\mathcal{L}_{util}$ 可能产生一个坏解：模型故意让 counterfactual branch 变差，从而轻易拉大 margin。
-
-因此引入冻结的 SFT baseline：
-
-$$
-P_0(\cdot\mid H)
-$$
-
-并约束错误 latent 下的输出不要偏离 baseline 太多：
-
-$$
-\mathcal{L}_{anchor}
-=
-D_{KL}
-\left(
-P(\cdot\mid H,\tilde Z)
-\;\|\;
-P_0(\cdot\mid H)
-\right)
-$$
-
-理想行为：
-
-~~~text
-Wrong / unhelpful latent
-→ prediction falls back toward SFT baseline
-
-Correct personalized latent
-→ prediction improves beyond SFT baseline
-~~~
-
----
-
-## 3.5 CURE Objective
-
-$$
-\mathcal{L}_{CURE}
-=
-\mathcal{L}_{rec}
+\ell^0_{i,t}(v)
 +
-\lambda_u\mathcal{L}_{util}
-+
-\lambda_a\mathcal{L}_{anchor}
+\alpha_{i,t}r_{i,t}(v),
+\quad v\in\mathcal C_{i,t}
 $$
 
-核心 ablation：
+其中 $\alpha_{i,t}\in[0,1]$ 是 correction gate。
 
-| Variant | Rec | Util | Anchor |
-|---|---:|---:|---:|
-| SFT | ✓ | – | – |
-| Latent-CE | ✓ | – | – |
-| CURE-U | ✓ | ✓ | – |
-| CURE-UA | ✓ | ✓ | ✓ |
+推荐实现使用冻结 LM-head/SID token embedding 作为 candidate basis：
+
+$$
+u_{i,t}=\operatorname{MLP}([h^0_{i,t};Z_i])
+$$
+
+$$
+r_{i,t}(v)=\frac{(W_r u_{i,t})^\top e_v}{\sqrt d}
+$$
+
+其中 $e_v$ 是合法 SID token $v$ 的冻结输出 embedding。
+
+关键结构性质：
+
+$$
+r=0\;\text{or}\;\alpha=0
+\Rightarrow
+P_\theta=P_0
+$$
+
+因此 baseline fallback 是模型结构中的显式参考点，而不是另一个重新训练的 decoder。
 
 ---
 
-# 4. CURE 自身的机制验证
+# 5. Target Score
 
-这里的 intervention 只用于回答：
+训练和分析都只对三个 SID token 计算，不计算 EOS，并且 softmax 与 prefix-constrained decoding 使用同一合法 candidate set。
 
-> **CURE 自己的 latent pathway 是否真的贡献了它的性能增益？**
-
-它不是要形成一个跨所有 reasoning architectures 的统一 benchmark。
-
-## 4.1 Normal
+定义 correct-latent target score：
 
 $$
-P(y\mid H,Z)
-$$
-
-## 4.2 Zero Latent
-
-$$
-Z\rightarrow0
-$$
-
-测试 CURE latent pathway 的必要性。
-
-## 4.3 Global Shuffle
-
-$$
-Z_i\rightarrow Z_j
-$$
-
-测试模型是否只依赖一个 generic latent bias。
-
-## 4.4 Matched Counterfactual
-
-$$
-Z_i\rightarrow Z_{matched(j)}
-$$
-
-测试 CURE latent 是否具有当前用户特有的信息价值。
-
-## 4.5 Supporting Metrics
-
-传统推荐指标始终是主指标：
-
-- HR@K；
-- NDCG@K。
-
-机制指标作为辅助证据：
-
-### Necessity Gap
-
-$$
-NG@K
+S_i(Z)
 =
-HR@K_{normal}
--
-HR@K_{zero}
+\frac{1}{3}
+\sum_{t=1}^{3}
+\log P_\theta
+(y_{i,t}\mid H_i,y_{i,<t},Z)
 $$
 
-### Personalization Gap
+baseline score：
 
 $$
-PG@K
+S_i^0
 =
-HR@K_{normal}
--
-HR@K_{matched}
+\frac{1}{3}
+\sum_{t=1}^{3}
+\log P_0
+(y_{i,t}\mid H_i,y_{i,<t})
 $$
 
-也可以记录：
-
-- target log-prob change；
-- target rank change；
-- Top-K Jaccard；
-- candidate distribution divergence。
-
-这些指标用于解释 **CURE 的内部机制**，不是论文的独立 benchmark contribution。
-
-成功标准不是“NG / PG 越大越好”，而是：
-
-~~~text
-Recommendation accuracy      ↑
-CURE > SFT / Latent-CE        ideally
-NG / PG                       > 0 and stable
-Counterfactual branch         not catastrophically worse than SFT
-~~~
-
-如果出现：
-
-~~~text
-NG ↑
-PG ↑
-HR ↓
-~~~
-
-说明模型只是被强迫依赖一个低质量 latent，不算成功。
+所有核心 loss 都围绕同一个 score 定义。
 
 ---
 
-# 5. 当前项目状态
+# 6. Matched Counterfactual Latent
 
-当前处于 **Phase 0 — Baseline Sanitation & Reproducibility** 的收尾阶段。
+为样本 $i$ 选择另一个 donor $j\neq i$：
 
-已完成：
+$$
+\tilde Z_i=Z_j
+$$
 
-- Amazon Beauty 2018–2023 数据处理；
-- Amazon Sports 2018–2023 数据处理；
-- leave-two-out protocol 修正；
-- processed-data audit；
-- frozen validation / test sample IDs；
-- dataset manifests；
-- text embeddings；
-- RQ-VAE；
-- 3-code Semantic ID artifacts。
+第一版 matching 只控制：
 
-当前优先级：
+- history length bin；
+- target popularity bin；
+- frozen SFT baseline difficulty / target score bin。
 
-1. 完成并冻结 Beauty Qwen SFT baseline；
-2. 完成统一 validation / test evaluation；
-3. 用冻结 recipe 跑 Sports confirmation baseline；
-4. 完成 Phase 0 artifact identity 与 reproducibility closure；
-5. 进入 Phase 1 的 K=1 latent pathway。
-
-Beauty 是 development domain，Sports 是 confirmation domain。
+这样 donor latent 不至于只是明显 OOD noise，同时不会依赖 deployment 时不可获得的信息。matching 只用于训练/分析，正常 inference 不需要 donor。
 
 ---
 
-# 6. 研究路线：Phase 0 → Phase 5
+# 7. Core Objective
 
-## Phase 0 — Clean Baseline & Reproducibility
+## 7.1 Recommendation Loss
 
-### 已完成
+$$
+\mathcal L_{rec}=-S_i(Z_i)
+$$
 
-- 0A Data Processing；
-- 0B Processed Data Audit & Freeze；
-- 0C Text Embedding / RQ-VAE / SID Artifact。
+保证最终推荐本身正确。
 
-### 当前任务：0D–0E
+## 7.2 Positive Gain Constraint
 
-#### 0D — Qwen SFT Baseline
+定义 latent 相对 frozen baseline 的增量：
 
-Beauty：
+$$
+G_i=S_i(Z_i)-S_i^0
+$$
 
-~~~text
-pipeline debugging
-→ hyperparameter sanity
-→ freeze SFT recipe
-~~~
+要求正确 latent 至少提供 margin $m_g$：
 
-Sports：
+$$
+\mathcal L_{gain}
+=
+\max(0,m_g-G_i)
+$$
 
-~~~text
-reuse frozen recipe
-→ confirmation run
-~~~
+它不是声称首次使用 likelihood gain，而是把“必须优于 frozen baseline”作为 CURE 三角关系的第一条约束。
 
-固定：
+## 7.3 Personalized Lift Constraint
 
-- backbone；
-- LoRA / full-FT strategy；
-- learning rate；
-- effective batch size；
-- max history length；
-- SID tokenizer；
-- random seed；
-- checkpoint selection rule。
+定义：
 
-#### 0E — Evaluation & Freeze
-
-至少报告：
-
-- HR@1 / 5 / 10 / 20 / 50；
-- NDCG@5 / 10 / 20 / 50；
-- prediction coverage；
-- Top-1 concentration / popularity bias；
-- SID collision statistics；
-- basic history-sensitivity diagnostic。
-
-每个结果记录：
-
-- git SHA；
-- dataset manifest；
-- RQ-VAE / item-index identity；
-- tokenizer；
-- model checkpoint；
-- seed；
-- decoding config；
-- sample IDs。
-
-### Phase 0 Go / No-Go
-
-只有当 Beauty 完整 pipeline 可复现、Sports 能复用冻结 recipe，并且不再存在 train / inference / evaluation protocol mismatch，才进入 Phase 1。
-
----
-
-## Phase 1 — Minimal Latent-CE
-
-### 目标
-
-建立最简单的 $K=1$ latent pathway，并回答：
-
-> 单纯加入一个 latent reasoner，在普通 CE 下是否能提高推荐性能？
-
-实现：
-
-~~~text
-src/models/cure/
-    model.py
-    reasoner.py
-    losses.py
-~~~
+$$
+A_i=S_i(Z_i)-S_i(\tilde Z_i)
+$$
 
 要求：
 
-- $Z$ 只依赖 history；
-- gated residual fusion；
-- 不使用 utilization loss；
-- 不使用 multi-intent；
-- 不使用 teacher signal。
+$$
+\mathcal L_{personal}
+=
+\max(0,m_p-A_i)
+$$
 
-必须验证：
+它阻止模型只学习一个所有用户通用的 correction bias。
 
-1. gate = 0 时退化到 SFT-like behavior；
-2. train / generation 使用同一 latent 路径；
-3. save / reload 输出一致；
-4. normal / zero / shuffle 能产生可测差异。
+## 7.4 Safe Fallback Constraint
 
-核心比较：
+错误 latent 下，模型应接近 frozen baseline，而不是人为崩坏：
 
-| Model | 目的 |
-|---|---|
-| SFT | 无 latent baseline |
-| Latent-CE | 判断 latent architecture 本身是否有用 |
+$$
+\mathcal L_{safe}
+=
+\frac{1}{3}
+\sum_{t=1}^{3}
+D_{KL}
+\left(
+P_0^t
+\;\|\;
+P_\theta^t(\tilde Z_i)
+\right)
+$$
 
-### Go / No-Go
+KL 只在当前合法 SID candidate set $\mathcal C_{i,t}$ 上计算。方向采用 $KL(P_0\|P_\theta)$，把 frozen baseline 视为需要 preservation 的 reference teacher。
 
-如果 Latent-CE 连推荐性能都无法达到 SFT，先解决 representation / fusion，不进入复杂 regularization。
+## 7.5 Full CURE
+
+$$
+\boxed{
+\mathcal L_{CURE}
+=
+\mathcal L_{rec}
++
+\lambda_g\mathcal L_{gain}
++
+\lambda_p\mathcal L_{personal}
++
+\lambda_s\mathcal L_{safe}
+}
+$$
+
+目标行为不是简单的 `correct Z > wrong Z`，而是：
+
+$$
+\boxed{
+S_i(Z_i)>S_i^0\approx S_i(\tilde Z_i)
+}
+$$
+
+这会迫使 margin 主要来自 **correct latent 带来的正向增益**，而不是 wrong latent 的灾难性退化。
 
 ---
+
+# 8. Method Ablations
+
+最小 ablation：
+
+| Variant | Residual architecture | Gain | Personal | Safe |
+|---|---:|---:|---:|---:|
+| SFT | – | – | – | – |
+| Residual-CE | ✓ | – | – | – |
+| CURE-G | ✓ | ✓ | – | – |
+| CURE-GP | ✓ | ✓ | ✓ | – |
+| CURE-Full | ✓ | ✓ | ✓ | ✓ |
+
+其中 Residual-CE 只用于证明“增加一个 correction branch”本身是否足够；它不是主方法。
+
+---
+
+# 9. Evaluation
+
+主指标仍然是：
+
+- HR@1/5/10/20/50；
+- NDCG@5/10/20/50。
+
+CURE 自身增加三个支持性指标：
+
+### Residual Gain
+
+$$
+RG@K
+=HR@K_{normal}-HR@K_{SFT}
+$$
+
+### Personalized Gap
+
+$$
+PG@K
+=HR@K_{normal}-HR@K_{matched}
+$$
+
+### Fallback Degradation
+
+$$
+FD@K
+=HR@K_{SFT}-HR@K_{matched}
+$$
+
+理想关系：
+
+$$
+\boxed{RG>0,\quad PG>0,\quad FD\approx0}
+$$
+
+同时报告 target-score gain、target-rank shift 和 correction magnitude，辅助解释机制。
+
+---
+
+# 10. Experimental Roadmap
+
+## Phase 0 — Baseline & Artifacts ✅
+
+已完成 Beauty/Sports 数据处理、audit/freeze、text embedding、RQ-VAE、3-code SID 与基础 SFT pipeline。Beauty SFT 已完成正式评估。
+
+## Phase 1 — Residual Scoring Infrastructure ← current
+
+目标：实现与实际 prefix-constrained decoding 完全一致的 baseline/correct/counterfactual scoring，并保证 correction disabled 时精确恢复 SFT。
+
+先不做复杂 reasoner，不上多步 latent computation。
 
 ## Phase 2 — CURE Training
 
-### 目标
+按以下顺序逐项启用：
 
-在 Latent-CE 基础上加入 utilization regularization，使正确 latent 对最终预测产生额外增益。
+~~~text
+Residual-CE
+→ CURE-G
+→ CURE-GP
+→ CURE-Full
+~~~
 
-顺序：
+所有方法选择只在 Beauty validation 上完成。
 
-1. Latent-CE；
-2. CURE-U：$\mathcal{L}_{rec}+\lambda_u\mathcal{L}_{util}$；
-3. CURE-UA：再加入 $\lambda_a\mathcal{L}_{anchor}$。
+## Phase 3 — Mechanism Validation
 
-主要看：
+只对最终 CURE 做：
 
-- HR / NDCG 是否提高；
-- 相比 Latent-CE 的增益是否稳定；
-- anchor 是否避免 counterfactual branch 被人为破坏。
+- SFT / no correction；
+- normal correct latent；
+- matched counterfactual latent；
+- optional global shuffle。
 
-### 核心成功标准
-
-> **CURE 至少在 Beauty 上稳定优于或不弱于 Latent-CE，并有明确的机制证据说明增益来自 latent utilization，而不是额外参数本身。**
-
----
-
-## Phase 3 — Mechanistic Validation of CURE
-
-### 目标
-
-只对 CURE 自身做有针对性的 intervention，支持论文故事：
-
-> CURE 的 latent reasoning 确实促成了推荐性能提升。
-
-实验：
-
-- Normal；
-- Zero-Z；
-- Global Shuffle-Z；
-- Matched Counterfactual-Z。
-
-报告：
-
-- HR / NDCG；
-- NG；
-- PG；
-- target-rank shift；
-- candidate-set shift。
-
-可按 baseline difficulty 分成 easy / medium / hard，检查 latent gain 是否主要出现在困难样本。
-
-这一阶段不要求对 CARE / S²GR / IBA 等外部架构做同等 intervention。
-
----
+验证 `Correct > Baseline ≈ Matched` 是否成立。
 
 ## Phase 4 — Method Refinement
 
-只有在 Phase 2–3 的最小 CURE 已经成立后才做。
+只有主方法已经产生正向性能信号后才考虑：
 
-优先考虑的扩展顺序：
+- difficulty-aware weighting；
+- 更稳健 matching；
+- reasoner capacity；
+- multiple latent states；
+- joint LoRA tuning。
 
-1. difficulty-aware utilization weighting；
-2. 更稳健的 matched counterfactual sampling；
-3. fusion / reasoner capacity ablation；
-4. K > 1 multi-intent；
-5. functional diversity。
-
-不要同时加入多个扩展。
-
-如果进入 K > 1，不再只看 cosine diversity，而更关注 functional specialization：
-
-$$
-P(y\mid H,Z)
-\neq
-P(y\mid H,Z_{\setminus k})
-$$
-
----
+不把增加 depth 当默认改进方向。
 
 ## Phase 5 — Paper-Scale Validation
 
-这一阶段才扩展数据集和外部 baselines。
-
-### 数据集
-
-最低必做：
-
-- Amazon Beauty 2018–2023；
-- Amazon Sports 2018–2023。
-
-第三个数据集只在核心方法稳定后再决定。
-
-### 外部 Baselines
-
-外部方法主要做 **standard recommendation performance comparison**，不要求统一的 latent-faithfulness intervention。
-
-优先级：
-
-1. SFT / TIGER-style baseline；
-2. **CARE**：已实现，未来作为 SID-based reasoning 性能 baseline；
-3. 视时间与代码可用性再考虑 S²GR / IBA / SCoTER。
-
-对 CARE 的当前要求仅为：
-
-- 在同一 frozen dataset / SID / sample protocol 下训练与评估；
-- 报告标准 HR / NDCG；
-- 清楚说明 project adaptation 与原论文设置的差异。
-
-不把 CARE 的 progressive-off、query-state intervention 等专属分析作为当前 CURE 论文的必做实验。
-
-### Scaling / Robustness
-
-主结果稳定后可增加：
-
-- 不同 backbone size；
-- 不同 seed；
-- 不同 max history length；
-- LoRA vs full fine-tuning（如果算力允许）。
+- Beauty：development；
+- Sports：冻结 recipe confirmation；
+- CARE：SID reasoning performance baseline；
+- 视时间与代码可用性决定是否加入 S²GR / IBA / SCoTER；
+- 主结果稳定后再做 seeds / backbone scaling / optional third dataset。
 
 ---
 
-# 7. 最小论文实验矩阵
+# 11. Go / No-Go
 
-| Group | Experiments |
-|---|---|
-| Base | SFT |
-| Architecture | Latent-CE |
-| Method | CURE-U / CURE-UA |
-| CURE intervention | Normal / Zero / Shuffle / Matched |
-| Dataset | Beauty → Sports |
-| Performance baseline | CARE（后期） |
-| Optional baseline | S²GR / IBA / SCoTER |
-| Analysis | difficulty / latent gain / target-rank shift |
+进入正式 paper-scale 实验前，至少满足：
 
-这已经足够形成一篇 method-first paper，不需要把项目扩张成大型隐式推理评测工程。
+1. CURE 在 Beauty validation 的主要 HR/NDCG 指标稳定优于 SFT；
+2. CURE-Full 优于或至少不弱于 Residual-CE；
+3. target-score 层面满足 $S(Z)>S^0$；
+4. matched branch 接近 baseline，而不是明显崩坏；
+5. correction-disabled inference 与原 SFT decoding 完全一致；
+6. design freeze 后才重新评估 Beauty test，并在 Sports 使用相同 recipe。
+
+如果只有 PG 变大但 HR/NDCG 不升，说明方法只制造了依赖，不算成功。
 
 ---
 
-# 8. 论文主问题
+# 12. Working Contributions
 
-论文可以围绕三个问题展开，但都只服务于 CURE：
+如果实验成立，贡献优先表述为：
 
-### RQ1 — Does CURE improve generative recommendation?
+1. **Safe personalized residual formulation**：把 latent reasoning 定义为对 frozen generative recommender 的个性化增量修正，而非额外深度本身；
+2. **Asymmetric counterfactual objective**：要求 `Correct Z > Baseline ≈ Matched Z`，联合 positive lift、personalized specificity 与 safe fallback；
+3. **SID-aligned optimization**：训练目标与 prefix-constrained Semantic-ID candidate space 对齐；
+4. **Method-first evidence**：在 Beauty/Sports 上首先证明推荐性能提升，再用 residual gain / personalized gap / fallback degradation 解释增益来源。
 
-用 HR / NDCG 回答。
-
-### RQ2 — Does utilization regularization outperform a naive latent pathway?
-
-比较 Latent-CE、CURE-U、CURE-UA。
-
-### RQ3 — Is CURE's latent reasoning actually responsible for part of the gain?
-
-用 Zero / Shuffle / Matched intervention 回答。
-
-这三个问题已经构成完整方法论文故事，不需要额外证明“所有 latent reasoning 方法是否 faithful”。
-
----
-
-# 9. Working Contributions
-
-如果主实验成立，最终贡献优先写成：
-
-1. **Method**  
-   提出 CURE-Rec，一个面向 Semantic-ID generative recommendation 的轻量 latent reasoning framework。
-
-2. **Training Objective**  
-   提出 personalized utilization regularization 与 baseline anchoring，使 latent reasoning 提供真正的增量推荐信息，而不是仅形成辅助表示。
-
-3. **Recommendation Performance**  
-   在 Beauty / Sports 等数据集上证明 CURE 相比 SFT、naive latent architecture 和代表性 generative-reasoning baselines 具有竞争力。
-
-4. **Mechanistic Evidence**  
-   通过 CURE-specific controlled interventions 证明其 latent pathway 对性能提升具有可测贡献。
-
-注意第 4 点是 **supporting evidence for our method**，不是“提出一个适用于所有隐式推理模型的新 benchmark”。
-
----
-
-# 10. 主要风险与预案
-
-## 风险 A：Latent-CE 本身就足够强
-
-如果简单 latent architecture 已明显提升性能，CURE 必须证明 utilization objective 还能带来额外、稳定的增益，否则方法贡献不够强。
-
-## 风险 B：NG / PG 提高但推荐性能下降
-
-说明模型只是被强迫依赖 latent。
-
-优先改 representation / fusion，不继续增大 $\lambda_u$。
-
-## 风险 C：CURE 只在 Beauty 有效
-
-先冻结 Beauty recipe，再在 Sports 做 confirmation。不要在 Sports 上重新大规模调参掩盖泛化问题。
-
-## 风险 D：外部 baseline 适配成本过高
-
-CARE 已作为第一个 SID-compatible baseline。其他方法只在主方法成立后按工程成本选择，不追求 baseline 数量。
-
-## 风险 E：论文被理解成 evaluation paper
-
-全文始终保持优先级：
-
-> **performance → method → mechanism evidence**
-
-而不是：
-
-> evaluation metric → audit many models → method as appendix。
-
----
-
-# 11. 近期里程碑
-
-## Milestone A — Clean SFT Baseline
-
-完成 Phase 0D–0E。
-
-成功标志：
-
-> Beauty SFT fully reproducible; Sports reproduces the frozen recipe.
-
-## Milestone B — Latent-CE Works
-
-完成 Phase 1。
-
-成功标志：
-
-> K=1 latent architecture 至少不弱于 SFT，并且 train / inference 路径完全一致。
-
-## Milestone C — CURE Improves Utility
-
-完成 Phase 2。
-
-成功标志：
-
-> CURE-U / CURE-UA 在主要推荐指标上稳定优于 Latent-CE。
-
-## Milestone D — CURE Reasoning Is Used
-
-完成 Phase 3。
-
-成功标志：
-
-> Zero / Shuffle / Matched interventions 能解释 CURE 的部分性能增益，而不是只有 representation-level 差异。
-
-## Milestone E — Paper-Scale Evidence
-
-完成 Phase 5。
-
-成功标志：
-
-> Beauty + Sports 结果成立，并完成 CARE 等代表性性能 baseline 与必要 ablation。
-
----
-
-# 12. 当前暂不做
-
-Phase 0–3 明确不做：
-
-- 大规模 latent-reasoning model audit；
-- 为每个外部架构设计专属 faithfulness intervention；
-- explicit CoT generation；
-- teacher CoT distillation；
-- GRPO；
-- K=4 multi-intent；
-- complex dynamic routing；
-- posterior-prior；
-- baseline zoo。
-
-这些都只能在核心 CURE 方法成立后再决定是否值得扩展。
-
----
-
-# 13. 相关工作方向
-
-## 13.1 SID-based generative reasoning
-
-- **CARE — Bringing Reasoning to Generative Recommendation Through the Lens of Cascaded Ranking**  
-  Query-Anchored Reasoning + Progressive History Encoding。当前项目已经完成 protocol adaptation，后续主要作为性能 baseline。  
-  Paper: https://arxiv.org/abs/2602.03692  
-  Code: https://github.com/Linxyhaha/CARE
-
-- **S²GR** — stepwise semantic-guided latent reasoning；
-- **IBA / Where Reasoning Matters** — SID position-wise reasoning budget；
-- **SCoTER** — structured reasoning transfer。
-
-## 13.2 Latent reasoning recommendation
-
-- LatentR³；
-- LaRec；
-- HiLaR；
-- ReaRec；
-- LARES；
-- RecRec。
-
-这些工作主要用于 motivation / related work。是否进入实验由架构兼容性和代码成本决定。
-
-## 13.3 Semantic ID / tokenizer / protocol
-
-- ReSID；
-- UniGRec；
-- PIT；
-- AsymRec；
-- GenPAS。
-
----
-
-# 14. 一句话项目原则
-
-> **先把 CURE 做成一个更强的推荐方法，再用最小但可信的 intervention 证明：它的 latent reasoning 确实参与了这部分提升。**
-
----
-
-## Appendix — Markdown 数学公式约定
-
-行内公式使用：
-
-$P(y\mid H,Z)$
-
-块级公式使用：
-
-$$
-\mathcal{L}
-=
-\mathcal{L}_{rec}
-+
-\lambda_u\mathcal{L}_{util}
-+
-\lambda_a\mathcal{L}_{anchor}
-$$
-
-统一使用 `$...$` / `$$...$$`，避免不同 Markdown renderer 对 `\[...\]` 支持不一致。
+正式投稿前再次完成系统 related-work 查重；当前不声称单独的 residual learning、marginal gain 或 KL anchor 是原创。
