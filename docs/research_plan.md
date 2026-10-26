@@ -413,7 +413,7 @@ Residual-CE
 只有主方法已经产生正向性能信号后才考虑：
 
 - difficulty-aware weighting；
-- 更稳健 matching；
+-更稳健 matching；
 - reasoner capacity；
 - multiple latent states；
 - joint LoRA tuning。
