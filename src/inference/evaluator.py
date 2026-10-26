@@ -209,6 +209,7 @@ def evaluate(
             if not accelerator.is_main_process:
                 all_samples = _load_test_samples(
                     test_csv_path=test_csv_path,
+                    valid_csv_path=valid_csv_path,
                     user_sequences_path=user_sequences_path,
                     item_sid_ids=item_sid_ids,
                     max_history_len=max_history_len,
@@ -283,22 +284,15 @@ def evaluate(
                 f"batch {batch_idx + 1}/{num_batches} 完成"
             )
 
-    # ── 6. gather_for_metrics 收集结果 ────────────────────────────────────
+    # ── 6. gather_object 已在多进程时拉平各进程的列表 ─────────────────────
     logger.info(f"进程 {accelerator.process_index} 推理完成，准备 gather")
     gathered_predictions = gather_object(local_predictions)
     gathered_targets = gather_object(local_targets)
 
     # ── 7. 主进程算指标 + 保存 ───────────────────────────────────────────
     if accelerator.is_main_process:
-        # gathered_predictions/targets 在单进程时直接是数据，多进程时是嵌套列表
-        # 单进程：直接使用
-        if accelerator.num_processes == 1:
-            all_predictions = list(gathered_predictions)
-            all_targets = list(gathered_targets)
-        else:
-            # 多进程：拉平 list[list[...]]
-            all_predictions = sum(list(gathered_predictions), [])
-            all_targets = sum(list(gathered_targets), [])
+        all_predictions = list(gathered_predictions)
+        all_targets = list(gathered_targets)
 
         logger.info(f"收集到 {len(all_predictions)} 个预测结果")
 

@@ -1,4 +1,10 @@
-"""Hydra 启动脚本，调用 evaluator.evaluate()。"""
+"""
+Hydra 启动脚本，调用 evaluator.evaluate()。
+  conda activate cure_rec
+  python scripts/eval/run_eval.py
+  CUDA_VISIBLE_DEVICES=2,3 accelerate launch --num_processes 2 scripts/eval/run_eval.py
+
+"""
 import logging
 import sys
 from pathlib import Path
