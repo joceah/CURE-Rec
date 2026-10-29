@@ -25,6 +25,7 @@ class SidPrefixTree:
 
     def __init__(self, item_sid_ids: dict[int, list[int]]):
         self._root: dict = {}
+        self.token_ids = sorted({tid for sid in item_sid_ids.values() for tid in sid})
         for token_ids in item_sid_ids.values():
             node = self._root
             for tid in token_ids:

@@ -1,0 +1,154 @@
+# Safe Personalized Residual CURE；方法开发使用 Beauty validation。
+# 训练公共参数名对齐 sft.yaml，评估公共参数名对齐 eval.yaml。
+data:
+  domain: beauty
+  processed_dir: data/processed/${data.domain}_2018_2023
+  artifact_dir: data/artifacts/${data.domain}_2018_2023
+  # 训练交互序列；和 SFT 一样，从序列展开 (history, target) 训练样本。
+  user_sequences_path: ${data.processed_dir}/user_sequences.json
+  valid_path: ${data.processed_dir}/valid.csv
+  test_path: ${data.processed_dir}/test.csv
+  item_index_path: ${data.artifact_dir}/item.index.json
+  manifest_path: data/manifests/${data.domain}_2018_2023/manifest.json
+
+model:
+  llm:
+    # 冻结 SFT 的完整模型目录，对齐 sft.yaml 的 model.llm.sft_model_path。
+    sft_model_path: data/checkpoints/${data.domain}/sft/merged
+    tokenizer_path: data/checkpoints/${data.domain}/sft/tokenizer
+    local_files_only: true
+  # auto：由 Accelerate 给每个进程分配设备；选择显卡用 CUDA_VISIBLE_DEVICES。
+  device: auto
+  # 冻结 backbone 的权重类型；和下面的训练 mixed_precision 是两件事。
+  dtype: bfloat16
+
+reasoner:
+  hidden_dim: 256  # 单个 latent state 的维度。
+  num_heads: 4     # 一层 cross-attention 的 head 数；必须整除 hidden_dim。
+  dropout: 0.1
+residual:
+  hidden_dim: 256  # 候选 residual MLP 的中间维度，不是 backbone hidden size。
+  gate_bias: -3.0  # gate 的初始 bias；sigmoid(-3) 约 0.047，使初始修正较小。
+
+method:
+  # residual_ce → cure_g → cure_gp → cure_full，依次加入 gain/personal/safe。
+  variant: residual_ce
+  lambda_gain: 1.0     # L_gain 权重；只有启用该项的 variant 才使用。
+  lambda_personal: 1.0 # L_personal 权重。
+  lambda_safe: 1.0     # L_safe 权重。
+  margin_gain: 0.05    # correct 相对 baseline 的平均 log-prob margin（nat）。
+  margin_personal: 0.05 # correct 相对 matched 的平均 log-prob margin（nat）。
+
+matching:
+  # 离线 frozen SFT difficulty 缓存；改变数据/评分后端时会核对身份。
+  cache_path: data/cache/cure_v1/${data.domain}_train_difficulty.pt
+  buckets:
+    # 分桶边界，不是各 bucket 的大小；target popularity 只统计 train。
+    history_edges: [3, 5, 10, 20]
+    popularity_edges: [5, 20, 100, 500]
+    difficulty_edges: [-8.0, -5.0, -3.0, -1.0] # 三个合法 SID token 的平均 log-prob。
+
+train:
+  epochs: 3
+  # 以下步数均指 optimizer update，不是 microbatch；epoch 结束也会补一次验证。
+  eval_steps: 100 # null 仅在 epoch 结束验证；与 wandb_log_steps 无关。
+  early_stop:
+    enabled: true
+    monitor: NDCG@10 # CURE 看 correct branch，SFT 看 validation loss。
+    mode: max
+    patience_steps: 300 # 距上次显著提升的 optimizer update 数；在验证时判断。
+    min_delta: 0.0001    # 超过此绝对差值才重置 patience；不限制 best checkpoint 保存。
+  # 和 sft.yaml 一致：每张卡一次 forward 的样本数，GP/Full 至少为 2。
+  per_device_batch_size: 512
+  cache_per_device_batch_size: 32 # 每卡离线 difficulty scoring 的 batch，不参与梯度累积。
+  # 有效训练 batch = per_device_batch_size × GPU 数 × gradient_accumulation_steps。
+  gradient_accumulation_steps: 1
+  learning_rate: 0.0003
+  weight_decay: 0.01
+  warmup_ratio: 0.03
+  max_grad_norm: 1.0
+  max_history_len: 20 # 最多保留多少个历史商品，和 SFT 含义一致。
+  max_seq_len: 512    # prompt + 三个 target SID token 的总 token 上限。
+  seed: 42           # 模型初始化、训练样本抽样、shuffle 和 train donor 的随机种子。
+  sample_size: null  # null 使用全部训练样本；较小值只用于 smoke/开发子集。
+  max_steps: null    # optimizer update 数量上限，不是 microbatch 数；null 按 epochs 训练。
+  wandb_log_steps: 10 # 对齐 SFT：每多少次 optimizer update 记录训练指标，同时写控制台。
+  wandb_enabled: false
+  wandb_project: genrec
+  wandb_entity: null
+  wandb_run_name: cure_${data.domain}_${method.variant}_seed${train.seed}
+  wandb_mode: online # offline 只在本地记录。
+  wandb_group: cure_v1
+  wandb_tags: []
+  # CURE 专有：在新 run 中载入 branch 权重；不恢复 optimizer/scheduler。
+  init_checkpoint: null
+  overwrite_output_dir: true # true：清理本 run 的旧 checkpoint/验证结果并重新训练；CLI 日志重写。
+  output_dir: data/checkpoints/${data.domain}/cure_v1/${method.variant}_seed${train.seed}
+
+distributed:
+  # 普通 DDP 训练的 autocast：'no' 保持小型 branch 为 FP32，bf16 启用 BF16 autocast。
+  # 开启 DeepSpeed 后，实际精度由 deepspeed.bf16 / fp16 决定。
+  mixed_precision: 'no'
+  use_deepspeed: true # false 使用 DDP；true 启用下面的 DeepSpeed 配置。
+  zero3_init: true     # ZeRO-3 在加载 SFT 时就分片，降低加载阶段的 GPU 峰值。
+  deepspeed:
+    # 以下名称是 DeepSpeed 标准字段，和 sft.yaml 一致；按 train.* 自动计算/插值。
+    train_batch_size: auto
+    train_micro_batch_size_per_gpu: ${train.per_device_batch_size}
+    gradient_accumulation_steps: ${train.gradient_accumulation_steps}
+    gradient_clipping: ${train.max_grad_norm}
+    bf16:
+      enabled: true
+    fp16:
+      enabled: false
+    zero_force_ds_cpu_optimizer: false # CPU optimizer offload 默认沿用 PyTorch AdamW。
+    zero_optimization:
+      stage: 3 # 2 分片梯度/optimizer；3 还分片参数，包括 frozen SFT。
+      contiguous_gradients: true
+      overlap_comm: true
+      reduce_scatter: true
+      # bucket 大小/参数预算的单位是元素数量，不是 bytes。
+      reduce_bucket_size: 5000000
+      allgather_bucket_size: 5000000
+      stage3_prefetch_bucket_size: 5000000
+      stage3_param_persistence_threshold: 10000 # 小于此规模的参数可常驻 GPU，减少通信。
+      stage3_max_live_parameters: 50000000     # 参数调度的 live/reuse 预算。
+      stage3_max_reuse_distance: 50000000
+      stage3_gather_16bit_weights_on_model_save: false # CURE 只 gather 新增 branch 保存。
+      offload_optimizer:
+        device: none # cpu 将 optimizer states 放在 CPU。
+        pin_memory: true
+      offload_param:
+        device: none # cpu 卸载参数；只支持 ZeRO-3，cure_zero3 preset 默认开启。
+        pin_memory: true
+    wall_clock_breakdown: false
+    steps_per_print: 1000000
+
+eval:
+  # 对齐 eval.yaml：待评估模型路径。这里是 CURE branch 的 .pt 文件，不是 SFT 目录。
+  model_path: ${train.output_dir}/best.pt
+  split: valid # valid 用 data.valid_path；test 用 data.test_path，history 为 train+valid。
+  design_frozen: false # test/Sports 前必须记录已经冻结的 recipe。
+  recipe_id: null
+  max_history_len: ${train.max_history_len}
+  max_seq_len: ${train.max_seq_len}
+  sample_size: 1000 # null 为全量；和 eval.yaml 含义一致。
+  batch_size: 8     # 每进程评分 batch；生成仍按样本做 beam search。
+  num_beams: 50
+  random_seed: ${train.seed} # 对齐 eval.yaml：评估样本抽样和 matched donor 的 seed。
+  k_values: [1, 5, 10, 20, 50]
+  # 和 eval.yaml 一样，输出文件为 output_dir/output_name.json。
+  output_dir: data/eval_results/${data.domain}
+  output_name: cure_v1_${method.variant}_${eval.split}
+
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+  job:
+    chdir: false
+
+logging:
+  output_path: logs/cure_v1_${data.domain}_${method.variant}.log
+  level: INFO
+  mode: a

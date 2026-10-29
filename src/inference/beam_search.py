@@ -15,6 +15,7 @@ def generate_topk_sids(
     num_beams: int = 50,
     num_sid_layers: int = 3,
     device: torch.device | str = "cuda",
+    candidate_normalized: bool = False,
 ) -> list[list[tuple[int, ...]]]:
     """对一批 prompt 做 beam search，每个 prompt 返回 Top-num_beams 个 SID。
 
@@ -26,6 +27,8 @@ def generate_topk_sids(
         num_beams: beam 数量（也是返回的 Top-K 数）
         num_sid_layers: SID 层数（决定生成长度）
         device: 推理设备
+        candidate_normalized: 对合法 children 重新归一化；CURE v1 reference 使用 True。
+            默认 False 保留已发布的历史 SFT 评估协议。
 
     Returns:
         长度为 batch 的列表。每项是该 prompt 的 Top-num_beams 个 SID
@@ -66,6 +69,7 @@ def generate_topk_sids(
         do_sample=False,
         early_stopping=False,
         logits_processor=[processor],
+        renormalize_logits=candidate_normalized,
         pad_token_id=pad_id,
     )
     # outputs: [batch_size * num_beams, max_len + num_sid_layers]

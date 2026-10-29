@@ -515,3 +515,20 @@ Correct > Matched
 说明 margin 主要来自破坏 wrong-latent branch，优先加强 safe constraint / 改 residual parameterization。
 
 如果 residual_ce、CURE-G、CURE-Full 都无法超过 SFT，不继续单纯增加 latent depth；回到“reasoner 是否真的能找到 baseline 漏掉的信息”这个问题重新设计输入或 residual target。
+
+
+---
+
+# 17. 基础实现状态（2026-10-27）
+
+已按上述结构新增独立 CURE 实现，使用说明见 `docs/cure_usage.md`。完成候选评分、无 target 泄漏的 reasoner、scalar-gated residual、四项 loss、离线 difficulty 缓存与 non-self matching、四种训练变体、validation checkpoint selection 和三分支机制评估。
+
+验证结果：常规 CURE/SID/metrics 测试 32 项通过；独立真实 Beauty SFT invariant 测试通过；四个变体各用 8 条 train / 2 条 validation 完成一步训练 smoke。真实 SFT 在关闭 correction 后，与 candidate-normalized SFT 原生 beam 的 Top-10 完全一致。未运行正式方法训练、Beauty test 或 Sports。
+
+历史 SFT beam 没有在屏蔽非法 SID 后重新归一化。保留该默认行为用于兼容，同时新增 `candidate_normalized=True` reference。CURE 统一使用 `sid-candidate-logsoftmax-3stage-v1`；后续主结果必须采用同协议、同样本的 SFT 配对 reference。新增代码复用原生 LM-head / beam / KV cache，避免替换 BF16 GEMM 或重写 beam 导致排序偏差。
+
+下一步按 Step B–E 使用 Beauty validation 验证推荐增益与 safe personalized 行为；当前只完成实现与正确性验证，不代表 Go/No-Go 已满足。
+
+2026-10-27 多卡补充：已接入 Accelerate DDP、梯度累积与可选 W&B，difficulty 缓存及三分支评估支持多卡无重复分片，全局评估 matching 保持相同样本池。共享输出只由主进程写入。常规与 CPU 双进程测试合计 34 passed / 1 opt-in skipped；另通过双 RTX 3090 NCCL + BF16 集成测试及真实 Beauty SFT 的多卡训练/独立评估 CLI smoke。只验证功能，没有启动正式方法实验。
+
+2026-10-27 DeepSpeed 补充：已支持 ZeRO-2 / ZeRO-3 与 CPU parameter/optimizer offload，新增 `cure_zero2` / `cure_zero3` preset。ZeRO-3 分片加载、frozen SID basis 缓存、MHA external parameters、通信补齐评估和 branch-only gather checkpoint 均通过双 GPU 测试。真实 Beauty SFT 的 ZeRO-3 train/eval CLI 已跑通；同规模显存 smoke（microbatch=2、beam=10、8 train/3 valid）训练/评估阶段每卡 CUDA allocated peak 从 DDP 3.41–3.42 GiB 降至 ZeRO-3 + CPU parameter offload 0.916 GiB，非正式实验/显存上限承诺。

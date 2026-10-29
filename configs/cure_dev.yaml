@@ -1,0 +1,43 @@
+# 固定子集上的开发试验，不用于正式性能结论。
+defaults:
+  - cure
+  - _self_
+
+method:
+  variant: residual_ce
+
+train:
+  sample_size: 32768
+  per_device_batch_size: 128
+  gradient_accumulation_steps: 1 # 双卡有效 batch=256；先比较 64/128 两种 microbatch。
+  learning_rate: 0.0001        # 对照值；另比较 0.0003。
+  epochs: 3
+  max_steps: null             # 比较相同训练样本曝光量，而非相同 optimizer step 数。
+  eval_steps: null            # 小子集每个 epoch 验证，避免改变 batch 后验证曝光量不同。
+  early_stop:
+    enabled: true
+    patience_steps: 256       # 默认双卡配置约两个 epoch；对照 sweep 可关闭早停。
+  output_dir: data/checkpoints/${data.domain}/cure_dev/${method.variant}_b${train.per_device_batch_size}_lr${train.learning_rate}_seed${train.seed}
+  wandb_run_name: cure_dev_${data.domain}_${method.variant}_b${train.per_device_batch_size}_lr${train.learning_rate}_seed${train.seed}
+
+matching:
+  cache_path: data/cache/cure_dev/${data.domain}_n${train.sample_size}_seed${train.seed}_difficulty.pt
+
+distributed:
+  use_deepspeed: true
+  mixed_precision: bf16
+  deepspeed:
+    zero_optimization:
+      stage: 3
+      offload_param:
+        device: none
+      offload_optimizer:
+        device: none
+
+eval:
+  sample_size: 200
+  num_beams: 10
+  k_values: [1, 5, 10]
+
+logging:
+  output_path: logs/cure_dev_${data.domain}_${method.variant}_b${train.per_device_batch_size}_lr${train.learning_rate}_seed${train.seed}.log

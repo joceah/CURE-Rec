@@ -34,7 +34,16 @@ model:
 
 train:
   epochs: 3
-  per_device_batch_size: 32
+  max_steps: null # optimizer update 上限；null 按 epochs 训练。
+  # 以下步数均指 optimizer update，不是 microbatch；epoch 结束也会补一次验证。
+  eval_steps: 500 # null 仅在 epoch 结束验证；与 wandb_log_steps 无关。
+  early_stop:
+    enabled: true
+    monitor: loss # CURE 看 correct branch，SFT 看 validation loss。
+    mode: min
+    patience_steps: 2500 # 距上次显著提升的 optimizer update 数；在验证时判断。
+    min_delta: 0.0001    # 超过此绝对差值才重置 patience；不限制 best checkpoint 保存。
+  per_device_batch_size: 32 # 每张卡一次 forward 的样本数；和 CURE 同名。
   gradient_accumulation_steps: 4
   learning_rate: 2e-4
   weight_decay: 0.01
@@ -43,11 +52,19 @@ train:
   max_seq_len: 512
   aux_ratio: 0.1
   seed: 42
+  wandb_enabled: true
+  wandb_mode: online
   wandb_project: genrec
   wandb_run_name: sft_${data.domain}_v1
-  wandb_log_steps: 10
+  wandb_log_steps: 10 # 每多少次 optimizer update 记录训练指标；和 CURE 同名。
   output_dir: data/checkpoints/${data.domain}/sft
   tokenizer_save_dir: ${train.output_dir}/tokenizer
+
+# 固定 validation 子集用于 step 验证和早停，避免频繁跑全量数据。
+eval:
+  sample_size: 1000 # null 使用全部 validation。
+  batch_size: ${train.per_device_batch_size}
+  random_seed: ${train.seed}
 
 distributed:
   mixed_precision: bf16
